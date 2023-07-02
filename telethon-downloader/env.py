@@ -31,8 +31,8 @@ TG_MAX_PARALLEL = int(os.environ.get('TG_MAX_PARALLEL',4))
 TG_DL_TIMEOUT = int(os.environ.get('TG_DL_TIMEOUT',3600))
 YT_DL_TIMEOUT = int(os.environ.get('TG_DL_TIMEOUT',7200))
 
-PATH_TMP = os.path.join(TG_DOWNLOAD_PATH,'tmp')
-PATH_COMPLETED = os.path.join(TG_DOWNLOAD_PATH,'completed')
+PATH_TMP = os.path.join(TG_DOWNLOAD_PATH)
+PATH_COMPLETED = os.path.join(TG_DOWNLOAD_PATH)
 PATH_YOUTUBE = os.path.join(TG_DOWNLOAD_PATH,'youtube')
 
 PATH_CONFIG = '/config/config.ini'
