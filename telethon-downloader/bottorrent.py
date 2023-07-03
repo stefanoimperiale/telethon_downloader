@@ -138,10 +138,10 @@ async def worker(name):
             loop = asyncio.get_event_loop()
             if TG_PROGRESS_DOWNLOAD == True or TG_PROGRESS_DOWNLOAD == 'True':
                 task = loop.create_task(client.download_media(message, file_path,
-                                                              progress_callback=lambda x,y:callback_progress(x, y,
-                                                                                                      file_name,
-                                                                                                      update,
-                                                                                                      file_path)))
+                                                              progress_callback=lambda x, y: callback_progress(x, y,
+                                                                                                               file_name,
+                                                                                                               update,
+                                                                                                               file_path)))
             else:
                 task = loop.create_task(client.download_media(message, file_path))
             download_result = await asyncio.wait_for(task, timeout=maximum_seconds_per_download)
@@ -189,8 +189,8 @@ async def callback(event):
     elif message_id.startswith('STOP,'):
         message_id = message_id.split(',')[1]
         media_id, final_path = \
-        execute_queries(db, [(f'SELECT message_id, location FROM locations WHERE id=?', (message_id,)),
-                             (f'DELETE FROM locations', ())])[0][0]
+            execute_queries(db, [(f'SELECT message_id, location FROM locations WHERE id=?', (message_id,)),
+                                 (f'DELETE FROM locations', ())])[0][0]
         result = await client(functions.messages.GetMessagesRequest(id=[int(media_id)]))
         message = result.messages[0]
         await queue.put([event, message, final_path])
@@ -199,9 +199,16 @@ async def callback(event):
         await event.edit('Insert new folder name',
                          buttons=[[Button.inline('Back ', f'{message_id}'), Button.inline('❌ Cancel', data='CANCEL')]])
     else:
+        is_back = False
+        if message_id.startswith('BACK,'):
+            message_id = message_id.split(',')[1]
+            is_back = True
         media_id, base_path = \
-        execute_queries(db, [(f'SELECT message_id, location FROM locations WHERE id=?', (message_id,)),
-                             (f'DELETE FROM locations', ())])[0][0]
+            execute_queries(db, [(f'SELECT message_id, location FROM locations WHERE id=?', (message_id,)),
+                                 (f'DELETE FROM locations', ())])[0][0]
+        if is_back:
+            base_path = os.path.split(base_path)[0]
+
         await send_folders_structure(event, media_id, db, base_path)
 
 
@@ -210,7 +217,7 @@ async def handler(update):
     try:
         real_id = get_peer_id(update.message.peer_id)
         CID, peer_type = resolve_id(real_id)
-        is_torrent= False
+        is_torrent = False
 
         if update.message.from_id is not None:
             logger.info(
@@ -277,10 +284,10 @@ async def handler(update):
                         # shutil.move(fileNamePath, fileNamePath + "_process")
                 await msg.edit('{} files submitted'.format(sending))
                 logger.info("FILES SUBMITTED:[%s]", sending)
-            else:
-                # Check if reply of new directory command
-                async for message in client.iter_messages(CID, limit=1):
-                    print(message.id, message.text)
+            # else:
+            # Check if reply of new directory command
+            # async for message in client.iter_messages(CID, limit=1):
+        #     print(message.id, message.text)
 
         else:
             logger.info('UNAUTHORIZED USER: %s ', CID)
