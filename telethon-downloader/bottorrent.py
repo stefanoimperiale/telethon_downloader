@@ -233,7 +233,7 @@ async def handler(update):
             elif any(x in update.message.message for x in youtube_list):
                 file_name = 'YOUTUBE VIDEO'
             else:
-                if update.message.media.document.mime_type == 'application/x-bittorrent':
+                if update.message.media.document.mime_type == 'application/x-bittorrent' or update.message.file.name.lower().strip().endswith('.torrent'):
                     is_torrent = True
                 attributes = update.message.media.document.attributes
                 for attr in attributes:
