@@ -233,14 +233,16 @@ async def handler(update):
             elif any(x in update.message.message for x in youtube_list):
                 file_name = 'YOUTUBE VIDEO'
             else:
-                if update.message.media.document.mime_type == 'application/x-bittorrent' or update.message.file.name.lower().strip().endswith('.torrent'):
+                if update.message.media.document.mime_type == 'application/x-bittorrent' or (update.message.file.name is not None and update.message.file.name.lower().strip().endswith('.torrent')):
                     is_torrent = True
                 attributes = update.message.media.document.attributes
                 for attr in attributes:
-                    if isinstance(attr, types.DocumentAttributeFilename):
+                    if isinstance(attr, types.DocumentAttributeFilename) and attr.file_name is not None:
                         file_name = attr.file_name
                     elif update.message.message:
                         file_name = re.sub(r'[^A-Za-z0-9 -!\[\]\(\)]+', ' ', update.message.message)
+                    else:
+                        file_name = 'NONAME'
 
             messageLog = 'DOWNLOAD IN QUEUE [%s] [%s]' % (
                 time.strftime('%d/%m/%Y %H:%M:%S', time.localtime()), file_name)
