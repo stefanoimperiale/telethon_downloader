@@ -47,12 +47,12 @@ def create_directory(download_path: str) -> None:
         logger.info(f'create_directory Exception : {download_path} [{e}]')
 
 
-def get_folders(message_id, path):
+def get_folders(message_id,message_media_ids, path):
     """ Returns a list of folders in the path """
     folders = []
     for f in os.listdir(path):
         if os.path.isdir(os.path.join(path, f)):
-            folders.append((message_id, os.path.join(path, f), f))
+            folders.append((message_id, os.path.join(path, f), f, message_media_ids))
     return folders
 
 
@@ -69,12 +69,14 @@ def execute_queries(db, queries: List[Tuple[str, Tuple[Any]]]):
         return False
 
 
-async def send_folders_structure(message, message_media_id, db, base_path=PATH_COMPLETED):
-    dirs = get_folders(message_media_id, base_path)
+async def send_folders_structure(message_to_edit, message_media_ids, db, base_path=PATH_COMPLETED):
+    message_media_id = message_media_ids[-1]
+    messages_join=','.join(message_media_ids)
+    dirs = get_folders(message_media_id,messages_join, base_path)
     try:
         with db:
             cur = db.cursor()
-            cur.executemany('INSERT INTO locations(message_id,location,display_location) VALUES (?, ?, ?)', dirs)
+            cur.executemany('INSERT INTO locations(message_id,location,display_location, messages_ids) VALUES (?, ?, ?, ?)', dirs)
             dirs = cur.execute('SELECT id, display_location FROM locations where message_id=?',
                                (f'{message_media_id}',))
             dirs = sorted(dirs, key=lambda x: x[1])
@@ -82,8 +84,8 @@ async def send_folders_structure(message, message_media_id, db, base_path=PATH_C
                 map(lambda xy: Button.inline(f'{xy[1]}', data=f'{xy[0]}'), dirs))
             buttons = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]  # Max 3 buttons per row
 
-            cur.execute('INSERT INTO locations(message_id,location,display_location) VALUES (?, ?, ?)',
-                        (message_media_id, base_path, base_path))
+            cur.execute('INSERT INTO locations(message_id,location,display_location, messages_ids) VALUES (?, ?, ?, ?)',
+                        (message_media_id, base_path, base_path, messages_join))
             current_id = cur.lastrowid
             is_root = False
             if base_path == PATH_COMPLETED:
@@ -96,7 +98,7 @@ async def send_folders_structure(message, message_media_id, db, base_path=PATH_C
                                  Button.inline('❌ Cancel', data='CANCEL')]
             if not is_root:
                 operation_buttons.insert(1, Button.inline('⬅️ Back', data=f'BACK,{current_id}'))
-            await message.edit(f'Choose download folder \n (current dir: {base_path})', buttons=buttons
+            await message_to_edit.edit(f'Choose download folder \n (current dir: {base_path})', buttons=buttons
                                                                                                 + [operation_buttons])
     except Exception as why:
         logger.error(why)

@@ -16,14 +16,14 @@ UPDATE = """
 """
 
 import re
-import shutil
 import time
 import asyncio
 import zipfile
 import sqlite3
 
 # Imports Telethon
-from telethon import TelegramClient, events, functions
+from telethon.sync import  TelegramClient
+from telethon import events, functions
 from telethon.tl import types
 from telethon.utils import get_extension, get_peer_id, resolve_id
 from telethon.tl.custom import Button
@@ -52,7 +52,7 @@ temp_completed_path = ''
 
 db = sqlite3.connect("file::memory:?cache=shared")
 db.execute(
-    'CREATE TABLE locations(id INTEGER PRIMARY KEY,message_id varchar(50), location varchar(500) NOT NULL, display_location varchar(500))')
+    'CREATE TABLE locations(id INTEGER PRIMARY KEY, location varchar(500) NOT NULL,message_id varchar(50), display_location varchar(500), messages_ids varchar(50000))')
 
 
 async def tg_send_message(msg):
@@ -175,7 +175,24 @@ async def worker(name):
         queue.task_done()
 
 
-client = TelegramClient(session, api_id, api_hash, proxy=None, request_retries=10, flood_sleep_threshold=120)
+client = None
+with TelegramClient(session, api_id, api_hash, proxy=None, request_retries=10, flood_sleep_threshold=120,) as client_t:
+    client = client_t
+    result = client(functions.bots.SetBotCommandsRequest(
+        scope=types.BotCommandScopeDefault(),
+        lang_code='en',
+        commands=[types.BotCommand(
+            command='help',
+            description='some string here'
+        )]
+    ))
+    logger.info(result)
+
+
+async def put_in_queue(event, final_path, message_id):
+    result = await client(functions.messages.GetMessagesRequest(id=[int(message_id)]))
+    message = result.messages[0]
+    await queue.put([event, message, final_path])
 
 
 @client.on(events.CallbackQuery)
@@ -184,16 +201,16 @@ async def callback(event):
     logger.info(event)
     message_id = event.data.decode('utf-8')
     if message_id == 'CANCEL':
-        execute_queries(db, [(f'DELETE FROM locations', ())])
+        execute_queries(db, [(f'DELETE FROM messages', ())])
         return await event.edit('Canceled')
     elif message_id.startswith('STOP,'):
         message_id = message_id.split(',')[1]
-        media_id, final_path = \
-            execute_queries(db, [(f'SELECT message_id, location FROM locations WHERE id=?', (message_id,)),
+        media_id, final_path, messages = \
+            execute_queries(db, [(f'SELECT message_id, location, messages_ids FROM locations WHERE id=?', (message_id,)),
                                  (f'DELETE FROM locations', ())])[0][0]
-        result = await client(functions.messages.GetMessagesRequest(id=[int(media_id)]))
-        message = result.messages[0]
-        await queue.put([event, message, final_path])
+
+        producers = list(map(lambda x: asyncio.create_task(put_in_queue(event, final_path, x)), messages.split(',')))
+        await asyncio.gather(*producers)
     elif message_id.startswith('NEW,'):
         message_id = message_id.split(',')[1]
         await event.edit('Insert new folder name',
@@ -203,13 +220,25 @@ async def callback(event):
         if message_id.startswith('BACK,'):
             message_id = message_id.split(',')[1]
             is_back = True
-        media_id, base_path = \
-            execute_queries(db, [(f'SELECT message_id, location FROM locations WHERE id=?', (message_id,)),
+        media_id, base_path, messages_ids = \
+            execute_queries(db, [(f'SELECT message_id, location, messages_ids FROM locations WHERE id=?', (message_id,)),
                                  (f'DELETE FROM locations', ())])[0][0]
         if is_back:
             base_path = os.path.split(base_path)[0]
 
-        await send_folders_structure(event, media_id, db, base_path)
+        await send_folders_structure(event, messages_ids.split(','), db, base_path)
+
+
+current_messages = list()
+current_timer = None
+
+
+
+async def test_message(message):
+    messages_id = current_messages.copy()
+    current_messages.clear()
+    await send_folders_structure(message, messages_id, db)
+
 
 
 @events.register(events.NewMessage)
@@ -233,7 +262,9 @@ async def handler(update):
             elif any(x in update.message.message for x in youtube_list):
                 file_name = 'YOUTUBE VIDEO'
             else:
-                if update.message.media.document.mime_type == 'application/x-bittorrent' or (update.message.file.name is not None and update.message.file.name.lower().strip().endswith('.torrent')):
+                if update.message.media.document.mime_type == 'application/x-bittorrent' or (
+                        update.message.file.name is not None and update.message.file.name.lower().strip().endswith(
+                        '.torrent')):
                     is_torrent = True
                 attributes = update.message.media.document.attributes
                 for attr in attributes:
@@ -251,7 +282,16 @@ async def handler(update):
             if is_torrent:
                 await queue.put([message, update.message, download_path_torrent])
             else:
-                await send_folders_structure(message, update.message.id, db)
+                # await send_folders_structure(message, update.message.id, db)
+                timeout = 1
+                current_messages.append(str(update.message.id))
+                global current_timer
+                if current_timer is not None:
+                    current_timer.cancel()
+                loop = asyncio.get_event_loop()
+                current_timer = loop.call_later(timeout, lambda: asyncio.ensure_future(test_message(message)))
+
+
         elif AUTHORIZED_USER and CID in usuarios:
             if update.message.message == '/help':
                 await update.reply(HELP)
