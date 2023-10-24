@@ -20,4 +20,6 @@ RUN chmod 777 -R /etc/services.d/
 
 VOLUME /download /watch /config
 
+ENV bottorrent /config/bottorrent
+
 CMD ["python3", "/app/bottorrent.py"]

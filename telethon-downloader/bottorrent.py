@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from telethon.tl.types import KeyboardButtonRequestPeer, RequestPeerTypeBroadcast, RequestPeerTypeChat, \
+    KeyboardButtonCallback
 
 VERSION = "VERSION 3.1.11"
 HELP = """
@@ -14,6 +16,7 @@ UPDATE = """
 - DESCARGA DE VIDEOS/LISTAS YOUTUBE.COM Y YOUTU.BE (SOLO ENVIANDO EL LINK DEL VIDEO/LISTA)
 - UPLOAD FILES IN /download/sendFiles CON EL COMANDO /sendfiles
 """
+REQUEST_CHAT_ID= 22
 
 import re
 import time
@@ -26,7 +29,7 @@ from telethon import  TelegramClient
 from telethon import events, functions
 from telethon.tl import types
 from telethon.utils import get_extension, get_peer_id, resolve_id
-from telethon.tl.custom import Button
+from telethon.tl.custom import Button, InlineBuilder
 
 from env import *
 from logger import logger
@@ -177,6 +180,8 @@ async def worker(name):
 
 
 client = TelegramClient(session, api_id, api_hash, proxy=None, request_retries=10, flood_sleep_threshold=120,)
+user_client = TelegramClient('user_client', api_id, api_hash, proxy=None, request_retries=10, flood_sleep_threshold=120,)
+
 async def put_in_queue(final_path, messages_id):
     message_id, event_id = messages_id.split(';')
     result = await client(functions.messages.GetMessagesRequest(id=[int(message_id), int(event_id)]))
@@ -185,7 +190,8 @@ async def put_in_queue(final_path, messages_id):
     await queue.put([event, message, final_path])
 
 
-@client.on(events.CallbackQuery)
+
+@client.on(events.CallbackQuery())
 async def callback(event):
     # chat = await event.get_chat()
     logger.info(event)
@@ -228,6 +234,19 @@ async def test_message(message):
     messages_id = current_messages.copy()
     current_messages.clear()
     await send_folders_structure(message, messages_id, db)
+
+
+@user_client.on(events.NewMessage(func=lambda e: e.is_channel is True or e.is_group is True))
+async def user_event_handler(event):
+    print(event)
+    # event.chat_id
+    # TODO
+
+@client.on(events.Raw(types=types.UpdateNewMessage, func=lambda e: e.message.action and (e.message.action.button_id == REQUEST_CHAT_ID or e.message.action.button_id == REQUEST_CHAT_ID+1)))
+async def raw_handler(event):
+    print(event)
+
+
 
 
 
@@ -283,7 +302,16 @@ async def handler(update):
 
 
         elif AUTHORIZED_USER and CID in usuarios:
-            if update.message.message == '/help':
+
+            if update.message.message == '/subscribe':
+               channels_k= KeyboardButtonRequestPeer('📣 Subscribe to Channel', REQUEST_CHAT_ID, RequestPeerTypeBroadcast())
+               groups_k = KeyboardButtonRequestPeer('👯‍♂️ Subscribe to Group', REQUEST_CHAT_ID+1, RequestPeerTypeChat())
+               remove_s = types.KeyboardButton('🗑 Remove subscription')
+               b = types.ReplyKeyboardMarkup([types.KeyboardButtonRow([channels_k, groups_k]), types.KeyboardButtonRow([remove_s])], resize=True, single_use=True)
+               await update.reply('Subscribe to automatically download on new messages', buttons=b)
+            elif update.message.message == '🗑 Remove subscription':
+                print('remove')
+            elif update.message.message == '/help':
                 await update.reply(HELP)
             elif update.message.message == '/version':
                 await update.reply(VERSION)
@@ -341,7 +369,7 @@ if __name__ == '__main__':
         # Start bot with token
         client.start(bot_token=str(bot_token))
         client.add_event_handler(handler)
-
+        user_client.start()
 
         # Press Ctrl+C to stop
         loop.run_until_complete(client(functions.bots.SetBotCommandsRequest(
@@ -351,6 +379,10 @@ if __name__ == '__main__':
                 command='help',
                 description='Get the list of available commands'
             ),
+                types.BotCommand(
+                    command='subscribe',
+                    description='Listen for new messages in a channel or group'
+                ),
                 types.BotCommand(
                     command='version',
                     description='Get the version of the bot'
@@ -368,6 +400,8 @@ if __name__ == '__main__':
                     description='Create a new folder'
                 )]
         )))
+
+        # loop.run_until_complete()
 
         loop.run_until_complete(tg_send_message("Telethon Downloader Started: {}".format(VERSION)))
         logger.info("%s" % VERSION)

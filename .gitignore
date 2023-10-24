@@ -5,5 +5,5 @@ docker-compose.yml
 
 
 docker-compose.dev.yml
-telethon-downloader/bottorrent.session
-telethon-downloader/bottorrent.session-journal
+telethon-downloader/*.session
+telethon-downloader/*.session-journal
