@@ -22,7 +22,7 @@ import zipfile
 import sqlite3
 
 # Imports Telethon
-from telethon.sync import  TelegramClient
+from telethon import  TelegramClient
 from telethon import events, functions
 from telethon.tl import types
 from telethon.utils import get_extension, get_peer_id, resolve_id
@@ -72,7 +72,7 @@ async def callback_progress(current, total, file_name, message, download_path_):
     int_value = int(float(format_float) // 1)
     try:
         if (int_value != 100) and (int_value % 20 == 0):
-            await message.edit(f'Downloading {file_name} ... {format_float}% \ndownload in:\n{download_path_}')
+            await client.edit_message(message, f'Downloading {file_name} ... {format_float}% \ndownload in:\n{download_path_}')
     except Exception as e:
         logger.info('ERROR: %s' % e.__class__.__name__)
         logger.info('ERROR: %s' % str(e))
@@ -128,7 +128,7 @@ async def worker(name):
         file_path = os.path.join(final_folder, file_name)
 
         logger.info(f"getDownloadPath FILE [{file_name}] to [{file_path}]")
-        await update.edit(f'Downloading {file_name} \ndownload in:\n{file_path}')
+        await client.edit_message(update, f'Downloading {file_name} \ndownload in:\n{file_path}')
         # time.sleep(1)
         logger.info('Downloading... ')
         mensaje = 'STARTING DOWNLOADING %s [%s] BY [%s]' % (
@@ -159,39 +159,29 @@ async def worker(name):
             ######
             mensaje = 'DOWNLOAD FINISHED %s [%s] => [%s]' % (end_time, file_name, final_path)
             logger.info(mensaje)
-            await update.edit('Downloading finished:\n%s \nIN: %s\nat %s' % (file_name, final_path, end_time_short))
+            await client.edit_message(update, 'Downloading finished:\n%s \nIN: %s\nat %s' % (file_name, final_path, end_time_short))
+
         except asyncio.TimeoutError:
             logger.info('[%s] Time exceeded %s' % (file_name, time.strftime('%d/%m/%Y %H:%M:%S', time.localtime())))
-            await update.edit('Error!')
+            await client.edit_message(update, 'Error!')
             message = await update.reply('ERROR: Time exceeded downloading this file')
         except Exception as e:
             logger.critical(e)
             logger.info('[EXCEPCION]: %s' % (str(e)))
             logger.info('[%s] Excepcion %s' % (file_name, time.strftime('%d/%m/%Y %H:%M:%S', time.localtime())))
-            await update.edit('Error!')
+            await client.edit_message(update, 'Error!')
             await message.reply('ERROR: %s downloading : %s' % (e.__class__.__name__, str(e)))
 
         # Unidad de trabajo terminada.
         queue.task_done()
 
 
-client = None
-with TelegramClient(session, api_id, api_hash, proxy=None, request_retries=10, flood_sleep_threshold=120,) as client_t:
-    client = client_t
-    result = client(functions.bots.SetBotCommandsRequest(
-        scope=types.BotCommandScopeDefault(),
-        lang_code='en',
-        commands=[types.BotCommand(
-            command='help',
-            description='some string here'
-        )]
-    ))
-    logger.info(result)
-
-
-async def put_in_queue(event, final_path, message_id):
-    result = await client(functions.messages.GetMessagesRequest(id=[int(message_id)]))
+client = TelegramClient(session, api_id, api_hash, proxy=None, request_retries=10, flood_sleep_threshold=120,)
+async def put_in_queue(final_path, messages_id):
+    message_id, event_id = messages_id.split(';')
+    result = await client(functions.messages.GetMessagesRequest(id=[int(message_id), int(event_id)]))
     message = result.messages[0]
+    event = result.messages[1]
     await queue.put([event, message, final_path])
 
 
@@ -209,7 +199,7 @@ async def callback(event):
             execute_queries(db, [(f'SELECT message_id, location, messages_ids FROM locations WHERE id=?', (message_id,)),
                                  (f'DELETE FROM locations', ())])[0][0]
 
-        producers = list(map(lambda x: asyncio.create_task(put_in_queue(event, final_path, x)), messages.split(',')))
+        producers = list(map(lambda x: asyncio.create_task(put_in_queue(final_path, x)), messages.split(',')))
         await asyncio.gather(*producers)
     elif message_id.startswith('NEW,'):
         message_id = message_id.split(',')[1]
@@ -284,7 +274,7 @@ async def handler(update):
             else:
                 # await send_folders_structure(message, update.message.id, db)
                 timeout = 1
-                current_messages.append(str(update.message.id))
+                current_messages.append((str(update.message.id)+";"+ str(message.id)))
                 global current_timer
                 if current_timer is not None:
                     current_timer.cancel()
@@ -352,7 +342,33 @@ if __name__ == '__main__':
         client.start(bot_token=str(bot_token))
         client.add_event_handler(handler)
 
+
         # Press Ctrl+C to stop
+        loop.run_until_complete(client(functions.bots.SetBotCommandsRequest(
+            scope=types.BotCommandScopeDefault(),
+            lang_code='en',
+            commands=[types.BotCommand(
+                command='help',
+                description='Get the list of available commands'
+            ),
+                types.BotCommand(
+                    command='version',
+                    description='Get the version of the bot'
+                ),
+                types.BotCommand(
+                    command='sendfiles',
+                    description='Send files found in the /download/sendFiles folder'
+                ),
+                types.BotCommand(
+                    command='id',
+                    description='Get your Telegram ID'
+                ),
+                types.BotCommand(
+                    command='newfolder',
+                    description='Create a new folder'
+                )]
+        )))
+
         loop.run_until_complete(tg_send_message("Telethon Downloader Started: {}".format(VERSION)))
         logger.info("%s" % VERSION)
         config_file()
