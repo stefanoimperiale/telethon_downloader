@@ -1,0 +1,12 @@
+#!/usr/bin/with-contenv bash
+# permissions
+ mkdir -p \
+    /config \
+    /download \
+    /watch
+lsiown -R abc:abc /config /watch /app
+chmod -R 775 /config /watch /app
+lsiown abc:abc /download
+
+exec s6-setuidgid abc /app/bottorrent.py
+

@@ -1,25 +1,11 @@
-FROM python:3.9.17-alpine AS basetelethon
-
+FROM linuxserver/ffmpeg
 
 WORKDIR /app
 
 COPY requirements.txt requirements.txt
-RUN apk add  --no-cache ffmpeg rust cargo  && \
-	pip3 install -r requirements.txt --upgrade
-
-
-
-FROM basetelethon
+RUN apt update && apt install  -y python3 python3-pip --no-install-recommends && pip3 install -r requirements.txt --upgrade
 
 COPY telethon-downloader /app
 COPY root/ /
 
-RUN chmod 777 /app/bottorrent.py
-RUN chmod 777 -R /etc/services.d/
-
-
-VOLUME /download /watch /config
-
-ENV bottorrent /config/bottorrent
-
-CMD ["python3", "/app/bottorrent.py"]
+ENTRYPOINT ["/init"]

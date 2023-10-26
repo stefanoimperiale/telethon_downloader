@@ -60,7 +60,7 @@ async def callback(event):
             saved = execute_queries([(
                 'INSERT INTO subscriptions(user_id, chat_id, location, display_name) VALUES (?, ?, ?, ?)',
                 (user_id, chat_id, final_path, title))])[0]
-            if saved is True:
+            if saved is not False:
                 subs[int(user_id)][int(chat_id)] = Subscription(int(user_id), int(chat_id), final_path, title)
                 await event.edit('🎉 Subscription created, I will download new files from this chat'
                                  f' when a new media is sent inside <i>"{final_path}"</pre>')

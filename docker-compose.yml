@@ -1,23 +1,21 @@
 version: '3'
 
 services:
-
   telethon_downloader:
-    image: telethon_downloader
-    user: 1001:1001
+    image: stefanoimperiale/telethon-downloader
     container_name: telethon_downloader
     restart: unless-stopped
     environment:
-      - 'PUID=1000'
-      - 'PGID=1000'
-      - 'TG_AUTHORIZED_USER_ID='  #<telegram chat_id authorized>
-      - 'TG_API_ID='
-      - 'TG_API_HASH='
-      - 'TG_BOT_TOKEN='
-      - 'TG_PROGRESS_DOWNLOAD=True' #OPTIONAL
-      - 'TZ=America/Santiago'
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Rome
+      - TG_API_HASH=<api_hash>
+      - TG_API_ID=<api_id>
+      - TG_AUTHORIZED_USER_ID=<user_id>
+      - TG_BOT_TOKEN=<bot_token>
+      - TG_PROGRESS_DOWNLOAD=True
     volumes:
-      - /config/telethon_downloader:/config
+      - /path/to/config/telethon_downloader:/config
       - /path/to/download:/download
       - /path/to/download/torrent/watch:/watch
 

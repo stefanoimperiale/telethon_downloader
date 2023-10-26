@@ -71,6 +71,7 @@ async def handle_regular_commands(update, CID, subs, auth_user_event_handler):
                                                      code=update.message.message.replace(' ', '').replace('+', ''))
             u_client.set_authenticated(True)
             u_client.get_client().add_event_handler(auth_user_event_handler)
+            await client.send_message(CID, '✅ You are authenticated')
             return
 
         elif update.message.message == '/login':
