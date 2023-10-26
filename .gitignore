@@ -5,5 +5,9 @@ docker-compose.yml
 
 
 docker-compose.dev.yml
-telethon-downloader/*.session
-telethon-downloader/*.session-journal
+**/*.session
+**/*.session-journal
+**/*.db*
+**/*.ini
+
+.idea

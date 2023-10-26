@@ -1,43 +1,43 @@
 import os
-import re
-import configparser
 from typing import List, Tuple, Any
+
 from telethon.tl.custom import Button
 
+from clients import client
+from database import db
+from env import PATH_COMPLETED, TG_AUTHORIZED_USER_ID, AUTHORIZED_USER, user_ids
 from logger import logger
-from env import PATH_COMPLETED, TG_FOLDER_BY_AUTHORIZED, TG_DOWNLOAD_PATH_TORRENTS, \
-    TG_AUTHORIZED_USER_ID, PATH_CONFIG
 
 
 def splash() -> None:
     """ Displays splash screen """
-    logger.info('''
-----------------------------------------------
-   _
-  (_)___  __ ___   ____ _ _ __ __ _  __ _ ___
-  | / __|/ _` \ \ / / _` | '__/ _` |/ _` / __|
-  | \__ \ (_| |\ V / (_| | | | (_| | (_| \__ \\
- _/ |___/\__,_| \_/ \__,_|_|  \__, |\__,_|___/
-|__/                          |___/
-
-----------------------------------------------
-    
+    logger.info('''    
 ----------------------------------------------
  _       _      _   _
 | |_ ___| | ___| |_| |__   ___  _ __
-| __/ _ \ |/ _ \ __| '_ \ / _ \| '_ \\
+| __/ _ \\ |/ _ \\ __| '_ \\ / _ \\| '_ \\
 | ||  __/ |  __/ |_| | | | (_) | | | |
- \__\___|_|\___|\__|_| |_|\___/|_| |_|
+ \\__\\___|_|\\___|\\__|_| |_|\\___/|_| |_|
 
      _                     _                 _
   __| | _____      ___ __ | | ___   __ _  __| | ___ _ __
- / _` |/ _ \ \ /\ / / '_ \| |/ _ \ / _` |/ _` |/ _ \ '__|
-| (_| | (_) \ V  V /| | | | | (_) | (_| | (_| |  __/ |
- \__,_|\___/ \_/\_/ |_| |_|_|\___/ \__,_|\__,_|\___|_|
+ / _` |/ _ \\ \\ /\\ / / '_ \\| |/ _ \\ / _` |/ _` |/ _ \\ '__|
+| (_| | (_) \\ V  V /| | | | | (_) | (_| | (_| |  __/ |
+ \\__,_|\\___/ \\_/\\_/ |_| |_|_|\\___/ \\__,_|\\__,_|\\___|_|
 
 
 ----------------------------------------------
-	''')
+    ''')
+
+
+def split_input(input_) -> List[str]:
+    """ Returns a list of inputted strings """
+    inputs = []
+    if TG_AUTHORIZED_USER_ID.strip() == '':
+        return inputs
+    else:
+        inputs = list(map(str, input_.replace(" ", "").split(',')))
+        return inputs
 
 
 def create_directory(download_path: str) -> None:
@@ -47,16 +47,21 @@ def create_directory(download_path: str) -> None:
         logger.info(f'create_directory Exception : {download_path} [{e}]')
 
 
-def get_folders(message_id,message_media_ids, path):
+async def tg_send_file(CID, file, name=''):
+    async with client.action(CID, 'document') as action:
+        await client.send_file(CID, file, caption=name, force_document=True, progress_callback=action.progress)
+
+
+def get_folders(message_id, message_media_ids, path, is_subscription):
     """ Returns a list of folders in the path """
     folders = []
     for f in os.listdir(path):
         if os.path.isdir(os.path.join(path, f)):
-            folders.append((message_id, os.path.join(path, f), f, message_media_ids))
+            folders.append((message_id, os.path.join(path, f), f, message_media_ids, is_subscription))
     return folders
 
 
-def execute_queries(db, queries: List[Tuple[str, Tuple[Any]]]):
+def execute_queries(queries: List[Tuple[str, Tuple[Any, ...]]]):
     res = []
     try:
         with db:
@@ -69,14 +74,18 @@ def execute_queries(db, queries: List[Tuple[str, Tuple[Any]]]):
         return False
 
 
-async def send_folders_structure(message_to_edit, message_media_ids, db, base_path=PATH_COMPLETED):
+async def send_folders_structure(message_to_edit, message_media_ids, base_path=PATH_COMPLETED,
+                                 is_subscription=False):
     message_media_id = message_media_ids[-1]
-    messages_join=','.join(message_media_ids)
-    dirs = get_folders(message_media_id,messages_join, base_path)
+    messages_join = ','.join(message_media_ids)
+    dirs = get_folders(message_media_id, messages_join, base_path, is_subscription)
     try:
         with db:
             cur = db.cursor()
-            cur.executemany('INSERT INTO locations(message_id,location,display_location, messages_ids) VALUES (?, ?, ?, ?)', dirs)
+            # Insert sub folders
+            cur.executemany(
+                'INSERT INTO locations(message_id,location,display_location, messages_ids, is_subscription) VALUES ('
+                '?, ?, ?, ?, ?)', dirs)
             dirs = cur.execute('SELECT id, display_location FROM locations where message_id=?',
                                (f'{message_media_id}',))
             dirs = sorted(dirs, key=lambda x: x[1])
@@ -84,8 +93,10 @@ async def send_folders_structure(message_to_edit, message_media_ids, db, base_pa
                 map(lambda xy: Button.inline(f'{xy[1]}', data=f'{xy[0]}'), dirs))
             buttons = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]  # Max 3 buttons per row
 
-            cur.execute('INSERT INTO locations(message_id,location,display_location, messages_ids) VALUES (?, ?, ?, ?)',
-                        (message_media_id, base_path, base_path, messages_join))
+            # Insert current dir
+            cur.execute('INSERT INTO locations(message_id,location,display_location, messages_ids, is_subscription) '
+                        'VALUES (?, ?, ?, ?, ?)',
+                        (message_media_id, base_path, base_path, messages_join, is_subscription))
             current_id = cur.lastrowid
             is_root = False
             if base_path == PATH_COMPLETED:
@@ -93,140 +104,28 @@ async def send_folders_structure(message_to_edit, message_media_ids, db, base_pa
 
             operation_buttons = [Button.inline('➡️ This dir',
                                                data=f'STOP,{current_id}'),
-                                 # TODO try to understand if needed
-                                 # Button.inline('➕ New folder', data=f'NEW,{current_id}'),
-                                 Button.inline('❌ Cancel', data='CANCEL')]
+                                 Button.inline('❌ Cancel', data=f'CANCEL,{current_id}')]
             if not is_root:
                 operation_buttons.insert(1, Button.inline('⬅️ Back', data=f'BACK,{current_id}'))
-            await message_to_edit.edit(f'Choose download folder \n (current dir: {base_path})', buttons=buttons
-                                                                                                + [operation_buttons])
+            await message_to_edit.edit(f'📂 Choose download folder \n (current dir: {base_path})',
+                                       buttons=buttons + [operation_buttons])
     except Exception as why:
         logger.error(why)
         return False
 
 
-def getDownloadPath(filename, CID):
-    config = read_config_file()
-
-    download_path = PATH_COMPLETED
-    folderFlag = False
-
-    if (TG_FOLDER_BY_AUTHORIZED == True or TG_FOLDER_BY_AUTHORIZED == 'True') and (
-            CID in config['FOLDER_BY_AUTHORIZED']):
-        FOLDER_BY_AUTHORIZED = config['FOLDER_BY_AUTHORIZED']
-        for AUTHORIZED in FOLDER_BY_AUTHORIZED:
-            if AUTHORIZED == CID:
-                download_path = FOLDER_BY_AUTHORIZED[AUTHORIZED]
-                folderFlag = True
-                break
-
-    if not folderFlag:
-        REGEX_PATH = config['REGEX_PATH']
-        for regex in REGEX_PATH:
-            m = re.search('/(.*)/(.*)', regex)
-            if m:
-                if m.group(2) == 'i':
-                    result = re.search(m.group(1), filename, re.I)
-                    if result:
-                        if result.group(0):
-                            logger.info(f'REGEX_PATH :::: {regex} 1:[{result.group(0)}] ')
-                            download_path = os.path.join(REGEX_PATH[regex])
-                            folderFlag = True
-                            break
-                else:
-                    result = re.search(m.group(1), filename)
-                    if result:
-                        if result.group(0):
-                            download_path = os.path.join(REGEX_PATH[regex])
-                            folderFlag = True
-                            break
-    logger.info(f'getDownloadPath : {download_path}')
-
-    if not folderFlag:
-        DEFAULT_PATH = config['DEFAULT_PATH']
-        for ext in DEFAULT_PATH:
-            if filename.endswith(ext):
-                download_path = os.path.join(download_path, ext)
-                download_path = DEFAULT_PATH[ext]  # os.path.join(download_path,ext)
-                folderFlag = True
-                break
-
-    # Let the user choose the download directory
-
-    if filename.endswith('.torrent'): download_path = TG_DOWNLOAD_PATH_TORRENTS
-
-    complete_path = os.path.join(download_path, filename)
-    # create_directory(download_path)
-    # os.chmod(download_path, 0o777)
-    logger.info(f'getDownloadPath getDownloadPath  : {download_path}')
-
-    return download_path, complete_path
+def is_file_torrent(message):
+    return message.media.document.mime_type == 'application/x-bittorrent' or (
+            message.file.name is not None and message.file.name.lower().strip().endswith('.torrent'))
 
 
-def getUsers() -> Tuple[bool, List[int]]:
-    """ Returns a list of inputted strings """
-    inputs = []
-    if not TG_AUTHORIZED_USER_ID:
-        return False, inputs
-    elif TG_AUTHORIZED_USER_ID.strip() == '':
-        return False, inputs
+def replace_right(source, target, replacement, replacements=None):
+    return replacement.join(source.rsplit(target, replacements))
+
+
+async def tg_send_message(msg):
+    if AUTHORIZED_USER:
+        return await client.send_message(user_ids[0], msg)
     else:
-        inputs = list(map(int, TG_AUTHORIZED_USER_ID.strip().replace(" ", "").replace('-100', '').split(',')))
-        return True, inputs
-
-
-def split_input(input) -> List[str]:
-    """ Returns a list of inputted strings """
-    inputs = []
-    if TG_AUTHORIZED_USER_ID.strip() == '':
-        return inputs
-    else:
-        inputs = list(map(str, input.replace(" ", "").split(',')))
-        return inputs
-
-
-def config_file():
-    config = configparser.ConfigParser()
-    if not os.path.exists(PATH_CONFIG):
-        logger.info(f'CREATE DEFAULT CONFIG FILE : {PATH_CONFIG}')
-
-        config.read(PATH_CONFIG)
-
-        config['DEFAULT_PATH'] = {}
-        config['DEFAULT_PATH']['pdf'] = '/download/pdf'
-        config['DEFAULT_PATH']['cbr'] = '/download/pdf'
-        config['DEFAULT_PATH']['mp3'] = '/download/mp3'
-        config['DEFAULT_PATH']['flac'] = '/download/mp3'
-        config['DEFAULT_PATH']['jpg'] = '/download/jpg'
-        config['DEFAULT_PATH']['mp4'] = '/download/mp4'
-
-        config['REGEX_PATH'] = {}
-        config['REGEX_PATH']['/example/i'] = '/download/example'
-
-        config['FOLDER_BY_AUTHORIZED'] = {}
-
-        AUTHORIZED_USER, usuarios = getUsers()
-
-        for usuario in usuarios:
-            config['FOLDER_BY_AUTHORIZED'][f"{usuario}"] = '/download/{}'.format(f"{usuario}")
-
-        with open(PATH_CONFIG, 'w') as configfile:  # save
-            config.write(configfile)
-        return config
-    else:
-        config.read(PATH_CONFIG)
-        if not 'REGEX_PATH' in config:
-            config['REGEX_PATH'] = {}
-            config['REGEX_PATH']['/example.*example/i'] = '/download/example'
-            with open(PATH_CONFIG, 'w') as configfile:  # save
-                config.write(configfile)
-
-        logger.info(f'READ CONFIG FILE : {PATH_CONFIG}')
-
-        return config
-
-
-def read_config_file():
-    config = configparser.ConfigParser()
-    config.read(PATH_CONFIG)
-    return config
+        await client.send_message(user_ids[0], 'ERROR: NO AUTHORIZED USER')
+        raise Exception('ERROR: NO AUTHORIZED USER')
