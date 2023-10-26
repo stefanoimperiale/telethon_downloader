@@ -6,13 +6,18 @@ from telethon import Button
 from telethon.tl.types import (KeyboardButtonRequestPeer, RequestPeerTypeBroadcast, RequestPeerTypeChat,
                                KeyboardButton, KeyboardButtonRow, ReplyKeyboardMarkup)
 
-from clients import user_clients
+from clients import user_clients, client
 from env import REQUEST_CHAT_ID, HELP, VERSION, TG_DL_TIMEOUT, TG_DOWNLOAD_PATH
 from logger import logger
-from utils import tg_send_file, execute_queries
+from utils import tg_send_file, execute_queries, contains_telegram_code
 
 
-async def handle_regular_commands(update, CID, subs):
+async def auth_user(user_id):
+    await client.send_message(user_id, '👨‍💻 Click the button to require the authentication code', buttons=[
+        Button.request_phone('📞 Set my phone number', resize=True, single_use=True, selective=True)])
+
+
+async def handle_regular_commands(update, CID, subs, auth_user_event_handler):
     # -------------- CANCEL --------------
     if update.message.message == '❌ Cancel':
         await update.reply('Canceled', buttons=Button.clear())
@@ -58,15 +63,22 @@ async def handle_regular_commands(update, CID, subs):
     # -------------- -------------- --------------
     # -------------- SUBSCRIPTIONS --------------
     # -------------- -------------- --------------
-    # TODO check if user client is authenticated
     else:
         u_client = user_clients[CID]
-        if update.message.message == '/login':
+        if u_client and contains_telegram_code(
+                update.message.message.replace(' ', '')) and u_client.get_phone() is not None:
+            me = await u_client.get_client().sign_in(u_client.get_phone(),
+                                                     code=update.message.message.replace(' ', '').replace('+', ''))
+            u_client.set_authenticated(True)
+            u_client.get_client().add_event_handler(auth_user_event_handler)
+            return
+
+        elif update.message.message == '/login':
             if u_client and u_client.is_authenticated() is True:
                 await update.reply('⚠️ You are already authenticated')
                 return
             else:
-                auth_user()
+                await auth_user(CID)
 
         elif u_client is None or u_client.is_authenticated() is not True:
             await update.reply('⚠️ You are not authenticated. Please use /login command to authenticate')

@@ -141,6 +141,18 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
         real_id = get_peer_id(update.message.peer_id)
         CID, peer_type = resolve_id(real_id)
 
+        if (update.message.contact and (AUTHORIZED_USER and CID in user_ids) and CID in user_clients
+                and user_clients[CID].is_authenticated() is not True
+                and update.message.contact.user_id == CID):
+            phone = telethon.utils.parse_phone(update.message.contact.phone_number)
+            await user_clients[CID].get_client().send_code_request(phone, force_sms=False)
+            user_clients[CID].set_phone(phone)
+            await client.send_message(CID, '📱 Insert code received via Telegram with the format <b>+[code]</b>\n'
+                                           'and put whitespaces between the digits\n\n'
+                                           'Example: <b>+ 2 3 4 6 2</b>',
+                                      buttons=Button.clear())
+            return
+
         if update.message.from_id is not None:
             logger.info(
                 "USER ON GROUP => U:[%s]G:[%s]M:[%s]" % (update.message.from_id.user_id, CID, update.message.message))
@@ -176,7 +188,7 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
 
         elif AUTHORIZED_USER and CID in user_ids:
             if is_subscription is False:
-                await handle_regular_commands(update, CID, subs)
+                await handle_regular_commands(update, CID, subs, auth_user_event_handler=user_event_handler)
 
         else:
             logger.info('UNAUTHORIZED USER: %s ', CID)
@@ -200,12 +212,11 @@ async def auth():
         user_client.set_authenticated(authenticated)
         if authenticated:
             u_client.add_event_handler(user_event_handler)
-
-        # if not auth:
-        #     phone = "+393895535895"
-        #     await user_client.send_code_request(phone)
-        #     code = input('enter code: ')
-        #     await user_client.sign_in(phone, code)
+        elif user_client.get_user_id() in subs:
+            await client.send_message(
+                user_client.get_user_id(),
+                f'⚠️ You have some subscriptions saved but you are not authenticated, please use /login command'
+                f' to authenticate otherwise I will not be able to download new files from your subscriptions')
 
 
 if __name__ == '__main__':
@@ -220,7 +231,6 @@ if __name__ == '__main__':
         # Start bot with token
         client.start(bot_token=str(bot_token))
         client.add_event_handler(handler)
-        auth = loop.run_until_complete(auth())
         client.parse_mode = 'html'
 
         # Press Ctrl+C to stop
@@ -261,6 +271,7 @@ if __name__ == '__main__':
         splash()
         logger.info("%s" % VERSION)
         logger.info("********** START TELETHON DOWNLOADER **********")
+        auth = loop.run_until_complete(auth())
 
         client.run_until_disconnected()
     finally:
@@ -268,5 +279,6 @@ if __name__ == '__main__':
             task.cancel()
         # Stop Telethon
         client.disconnect()
-        for user_client in user_clients.values(): user_client.get_client().disconnect()
+        for u in user_clients.values():
+            u.get_client().disconnect()
         logger.info("********** STOPPED **********")

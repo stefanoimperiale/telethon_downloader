@@ -99,7 +99,7 @@ async def download_worker():
             else:
                 task = loop.create_task(download_client.download_media(message, file_path))
 
-            download_result = await asyncio.wait_for(task, timeout=TG_DL_TIMEOUT)
+            await asyncio.wait_for(task, timeout=TG_DL_TIMEOUT)
             end_time = time.strftime('%d/%m/%Y %H:%M:%S', time.localtime())
             end_time_short = time.strftime('%H:%M', time.localtime())
             # final_path = os.path.split(download_result)[1]

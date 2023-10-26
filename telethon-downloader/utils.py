@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Tuple, Any
 
 from telethon.tl.custom import Button
@@ -129,3 +130,8 @@ async def tg_send_message(msg):
     else:
         await client.send_message(user_ids[0], 'ERROR: NO AUTHORIZED USER')
         raise Exception('ERROR: NO AUTHORIZED USER')
+
+
+def contains_telegram_code(input_string):
+    pattern = r'\+\d{4,7}$'
+    return bool(re.search(pattern, input_string))
