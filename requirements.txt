@@ -1,3 +1,5 @@
 telethon
 yt_dlp
 cryptg
+hachoir
+pillow

@@ -45,7 +45,7 @@ HELP = """
 /help		: This Screen
 /subscribe  : Subscribe to a channel or a group and download a new media file as soon as it is posted
 /version	: Version  
-/sendfiles	: send files found in the /download/sendFiles folder
+/download	: Download files or folder inside your mapped download directory
 /id			: YOUR ID TELEGRAM
 """
 
