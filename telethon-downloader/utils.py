@@ -70,6 +70,7 @@ def progress_bar(count_value, total, suffix=''):
 async def upload_progress(action, current, total, event, start, timer, total_size, len_files):
     try:
         if total_size is not None:
+            print(f'current: {current} total: {total} total_size: {total_size} len_files: {len_files}')
             total = len_files
             current = (current / float(total)) * total_size
             total = total_size
