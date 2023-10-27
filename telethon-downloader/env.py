@@ -40,7 +40,7 @@ PATH_TMP = os.path.join(TG_DOWNLOAD_PATH)
 PATH_COMPLETED = os.path.join(TG_DOWNLOAD_PATH)
 PATH_YOUTUBE = os.path.join(TG_DOWNLOAD_PATH, 'youtube')
 
-VERSION = "VERSION 4.0.0"
+VERSION = "VERSION 4.1.0"
 HELP = """
 /help		: This Screen
 /subscribe  : Subscribe to a channel or a group and download a new media file as soon as it is posted
