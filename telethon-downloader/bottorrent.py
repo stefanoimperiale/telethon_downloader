@@ -7,17 +7,16 @@ import telethon.utils
 from telethon import events, functions
 from telethon.tl import types
 from telethon.tl.custom import Button
-from telethon.tl.types import InputMessageID
 from telethon.utils import get_peer_id, resolve_id
 
 from clients import client, queue, user_clients
-from commands import handle_regular_commands
+from commands import handle_regular_commands, handle_folder_choose_operation
 from download_worker import download_worker
 from env import *
 from logger import logger
 from model.subscription import Subscription
 from utils import send_folders_structure, \
-    execute_queries, tg_send_message, is_file_torrent, splash, replace_right
+    execute_queries, tg_send_message, is_file_torrent, splash, replace_right, tg_send_file
 
 download_path_torrent = TG_DOWNLOAD_PATH_TORRENTS  # Directory where to save torrent file (if enabled). Connect with
 # torrent client to start download.
@@ -31,41 +30,42 @@ for x in list(subs_query):
     subs[int(x[0])][int(x[1])] = Subscription(int(x[0]), int(x[1]), x[2], x[3])
 
 
-async def put_in_queue(final_path: str, messages_id: str):
-    message_id, event_id = messages_id.split(';')
-    result = await client(
-        functions.messages.GetMessagesRequest(id=[InputMessageID(int(message_id)), InputMessageID(int(event_id))]))
-    message = result.messages[0]
-    event = result.messages[1]
-    await queue.put([event, message, final_path, False, None])
-
-
 @client.on(events.CallbackQuery())
 async def callback(event):
+    real_id = get_peer_id(event.sender)
+    user_id, peer_type = resolve_id(real_id)
+    user_id = str(user_id)
     message_id = event.data.decode('utf-8')
     if message_id.startswith('CANCEL,'):
-        execute_queries([(f'DELETE FROM locations', ())])
+        execute_queries([(f'DELETE FROM locations where user_id=?', (user_id,))])
         return await event.edit('Canceled')
+
     elif message_id.startswith('STOP,'):
-        message_id = message_id.split(',')[1]
-        media_id, final_path, messages, is_subscription = \
-            execute_queries([(f'SELECT message_id, location, messages_ids, is_subscription FROM locations WHERE id=?',
-                              (message_id,)), (f'DELETE FROM locations', ())])[0][0]
-        if is_subscription != 1:
-            producers = list(map(lambda x: asyncio.create_task(put_in_queue(final_path, x)), messages.split(',')))
-            await asyncio.gather(*producers)
+        await handle_folder_choose_operation(message_id, user_id, event, subs)
+    elif message_id.startswith('FOLD,') or message_id.startswith('FILE,'):
+        message_id_s = message_id.split(',')[1]
+        media_id, final_path, messages, operation = \
+            execute_queries([(f'SELECT message_id, location, messages_ids, operation '
+                              f'FROM locations '
+                              f'WHERE id=? and user_id=?',
+                              (message_id_s, user_id)),
+                             (f'DELETE FROM locations where user_id=?', (user_id,))])[0][0]
+
+        files = next(os.walk(final_path), (None, None, []))[2]
+        files.sort(key=str.casefold)
+        size = 1
+        total_size = None
+        if message_id.startswith('FOLD,'):
+            files = list(map(lambda x: str(os.path.join(final_path, x)), files))
+            total_size = sum(os.path.getsize(f) for f in files)
+            len(files)
         else:
-            title = replace_right(messages, f',{media_id}', '', 1)
-            user_id, chat_id = media_id.split(',')
-            saved = execute_queries([(
-                'INSERT INTO subscriptions(user_id, chat_id, location, display_name) VALUES (?, ?, ?, ?)',
-                (user_id, chat_id, final_path, title))])[0]
-            if saved is not False:
-                subs[int(user_id)][int(chat_id)] = Subscription(int(user_id), int(chat_id), final_path, title)
-                await event.edit('🎉 Subscription created, I will download new files from this chat'
-                                 f' when a new media is sent inside <i>"{final_path}"</pre>')
-            else:
-                await event.edit('❗ Error saving chat id, try again')
+            files = str(os.path.join(final_path, files[int(message_id.split(',')[2])]))
+
+        await event.edit('Sending file(s)...')
+        await tg_send_file(int(user_id), files, total_size)
+        await client.send_message(int(user_id), '✅ {} files submitted'.format(size))
+
     elif message_id.startswith('NEW,'):
         message_id = message_id.split(',')[1]
         await event.edit('Insert new folder name',
@@ -75,26 +75,27 @@ async def callback(event):
         if message_id.startswith('BACK,'):
             message_id = message_id.split(',')[1]
             is_back = True
-        media_id, base_path, messages_ids, is_subscription = \
+        media_id, base_path, messages_ids, operation = \
             execute_queries(
-                [(f'SELECT message_id, location, messages_ids, is_subscription FROM locations WHERE id=?',
-                  (message_id,)),
-                 (f'DELETE FROM locations', ())])[0][0]
+                [(f'SELECT message_id, location, messages_ids, operation '
+                  f'FROM locations WHERE id=? and user_id=?',
+                  (message_id, user_id)),
+                 (f'DELETE FROM locations where user_id=?', (user_id,))])[0][0]
         if is_back:
             base_path = os.path.split(base_path)[0]
-        if is_subscription == 1:
+        if operation == 'subscription':
             title = replace_right(messages_ids, f',{media_id}', '', 1)
             messages_ids = [title, media_id]
         else:
             messages_ids = messages_ids.split(',')
 
-        await send_folders_structure(event, messages_ids, base_path, is_subscription=is_subscription == 1)
+        await send_folders_structure(event, user_id, messages_ids, base_path, operation=operation)
 
 
-async def answer_with_structure(message):
+async def answer_with_structure(message, user_id):
     messages_id = current_messages.copy()
     current_messages.clear()
-    await send_folders_structure(message, messages_id)
+    await send_folders_structure(message, user_id, messages_id)
 
 
 @events.register(events.NewMessage(func=lambda e: e.is_channel is True or e.is_group is True))
@@ -131,7 +132,10 @@ async def raw_handler(event):
         else:
             chat_from = await user_client.get_client().get_entity(event.message.action.peer)
             message = await client.send_message(event.message.peer_id, '📂 Choose download folder')
-            await send_folders_structure(message, [chat_from.title, f'{user_id},{chat_id}'], is_subscription=True)
+            await send_folders_structure(message,
+                                         user_id,
+                                         [chat_from.title, f'{chat_id}'],
+                                         operation='subscription')
 
 
 @events.register(events.NewMessage)
@@ -184,7 +188,8 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
                 if current_timer is not None:
                     current_timer.cancel()
                 loop_ = asyncio.get_event_loop()
-                current_timer = loop_.call_later(timeout, lambda: asyncio.ensure_future(answer_with_structure(message)))
+                current_timer = loop_.call_later(timeout,
+                                                 lambda: asyncio.ensure_future(answer_with_structure(message, CID)))
 
         elif AUTHORIZED_USER and CID in user_ids:
             if is_subscription is False:
@@ -250,8 +255,8 @@ if __name__ == '__main__':
                     description='Get the version of the bot'
                 ),
                 types.BotCommand(
-                    command='sendfiles',
-                    description='Send files found in the /download/sendFiles folder'
+                    command='download',
+                    description='Download files or folder inside your mapped download directory'
                 ),
                 types.BotCommand(
                     command='id',

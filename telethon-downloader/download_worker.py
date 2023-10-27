@@ -12,7 +12,7 @@ from clients import client, queue
 from env import TG_DL_TIMEOUT, TG_PROGRESS_DOWNLOAD, TG_UNZIP_TORRENTS, YOUTUBE_LINKS_SOPORTED
 from logger import logger
 from model.timer import Timer
-from utils import split_input
+from utils import split_input, progress_bar
 from youtube import download_youtube_video
 
 youtube_list = split_input(YOUTUBE_LINKS_SOPORTED)
@@ -35,18 +35,15 @@ def get_file_name(message: Message) -> str:
 
 
 # Printing download progress
-def callback_progress(current: int, total: int, message, download_path: str, start: float, timer: Timer,
-                      loop: asyncio.AbstractEventLoop):
-    value = (current * 100 / total)
-    done = int(30 * current / int(total))
-    progress = "\r[%s%s] %.2f Mbps" % ('=' * done, ' ' * (30 - done), current // (time.perf_counter() -
-                                                                                  start) / 100000)
-    format_float = "{:.2f}".format(value)
+async def callback_progress(current: int, total: int, message, download_path: str, start: float, timer: Timer):
+    speed = "%.2f Mbps" % (current // (time.perf_counter() -
+                                       start) / 100000)
+    progress = progress_bar(current, total, suffix=speed)
     try:
-        if timer.can_send():
-            loop.create_task(client.edit_message(message,
-                                                 f'⬇️ Downloading in: <i>"{download_path}"</i>'
-                                                 f'\n\n{format_float}% {progress}'))
+        if timer.can_send() or current == total:
+            await client.edit_message(message,
+                                      f'⬇️ Downloading in: <i>"{download_path}"</i>'
+                                      f'\n\n{progress}')
     except Exception as e:
         logger.info('ERROR: %s' % e.__class__.__name__)
         logger.info('ERROR: %s' % str(e))
@@ -94,8 +91,7 @@ async def download_worker():
                                                                            update,
                                                                            file_path,
                                                                            start,
-                                                                           timer,
-                                                                           loop)))
+                                                                           timer)))
             else:
                 task = loop.create_task(download_client.download_media(message, file_path))
 
@@ -113,6 +109,7 @@ async def download_worker():
 
             ######
             logger.info('DOWNLOAD FINISHED %s [%s] => [%s]' % (end_time, file_name, file_path))
+            await asyncio.sleep(1)
             await client.edit_message(update, '👍 Downloading finished:\n%s \nIN: %s\nat %s' % (
                 file_name, file_path, end_time_short))
 

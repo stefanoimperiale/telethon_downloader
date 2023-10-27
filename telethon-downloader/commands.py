@@ -2,19 +2,66 @@ import asyncio
 import os
 import re
 
-from telethon import Button
+from telethon import Button, functions
 from telethon.tl.types import (KeyboardButtonRequestPeer, RequestPeerTypeBroadcast, RequestPeerTypeChat,
-                               KeyboardButton, KeyboardButtonRow, ReplyKeyboardMarkup)
+                               KeyboardButton, KeyboardButtonRow, ReplyKeyboardMarkup, InputMessageID)
 
-from clients import user_clients, client
-from env import REQUEST_CHAT_ID, HELP, VERSION, TG_DL_TIMEOUT, TG_DOWNLOAD_PATH
+from clients import user_clients, client, queue
+from env import REQUEST_CHAT_ID, HELP, VERSION
 from logger import logger
-from utils import tg_send_file, execute_queries, contains_telegram_code
+from model.subscription import Subscription
+from utils import execute_queries, contains_telegram_code, send_folders_structure, replace_right
 
 
 async def auth_user(user_id):
     await client.send_message(user_id, '👨‍💻 Click the button to require the authentication code', buttons=[
         Button.request_phone('📞 Set my phone number', resize=True, single_use=True, selective=True)])
+
+
+async def put_in_queue(final_path: str, messages_id: str):
+    message_id, event_id = messages_id.split(';')
+    result = await client(
+        functions.messages.GetMessagesRequest(id=[InputMessageID(int(message_id)), InputMessageID(int(event_id))]))
+    message = result.messages[0]
+    event = result.messages[1]
+    await queue.put([event, message, final_path, False, None])
+
+
+async def handle_folder_choose_operation(message_id, user_id, event, subs):
+    message_id = message_id.split(',')[1]
+    media_id, final_path, messages, operation = \
+        execute_queries([(f'SELECT message_id, location, messages_ids, operation '
+                          f'FROM locations '
+                          f'WHERE id=? and user_id=?',
+                          (message_id, user_id))])[0][0]
+    if operation != 'send':
+        execute_queries([(f'DELETE FROM locations where user_id=?', (user_id,))])
+    if operation == 'download':
+        producers = list(map(lambda x: asyncio.create_task(put_in_queue(final_path, x)), messages.split(',')))
+        await asyncio.gather(*producers)
+    elif operation == 'subscription':
+        title = replace_right(messages, f',{media_id}', '', 1)
+        chat_id = media_id
+        saved = execute_queries([(
+            'INSERT INTO subscriptions(user_id, chat_id, location, display_name) VALUES (?, ?, ?, ?)',
+            (user_id, chat_id, final_path, title))])[0]
+        if saved is not False:
+            subs[int(user_id)][int(chat_id)] = Subscription(int(user_id), int(chat_id), final_path, title)
+            await event.edit('🎉 Subscription created, I will download new files from this chat'
+                             f' when a new media is sent inside <i>"{final_path}"</pre>')
+        else:
+            await event.edit('❗ Error saving chat id, try again')
+    elif operation == 'send':
+        files = next(os.walk(final_path), (None, None, []))[2]
+        if (len(files)) == 0:
+            await event.edit('❌ No files found in the folder', buttons=Button.clear())
+        else:
+            files.sort(key=str.casefold)
+            await event.edit('Choose file or folder to download', buttons=[
+                [Button.inline('❌ Cancel', data=f'CANCEL,{message_id}')],
+                [Button.inline(f'🗂️ All files in the folder', data=f'FOLD,{message_id}')],
+                *list(map(lambda x: [Button.inline(f'📄 {x[1]}', f'FILE,{message_id},{x[0]}')], enumerate(files))),
+            ])
 
 
 async def handle_regular_commands(update, CID, subs, auth_user_event_handler):
@@ -35,31 +82,10 @@ async def handle_regular_commands(update, CID, subs, auth_user_event_handler):
         await update.reply('id: {}'.format(CID))
         logger.info('me :[%s]' % CID)
     # -------------- SENDFILES --------------
-    elif update.message.message == '/sendfiles':
-        msg = await update.reply('Sending files...')
-        # TODO Choose a folder to send
-        base_path = os.path.join(TG_DOWNLOAD_PATH, 'sendFiles')
-        sending = 0
-        for root, subFolder, files in os.walk(base_path):
-            subFolder.sort()
-            files.sort()
-            for item in files:
-                if item.endswith('_process'):
-                    # skip directories
-                    continue
-                sending += 1
-                file_name_path = str(os.path.join(root, item))
-                logger.info("SEND FILE :[%s]", file_name_path)
-                await msg.edit('Sending {}...'.format(item))
-                loop = asyncio.get_event_loop()
-                task = loop.create_task(tg_send_file(CID, file_name_path, item))
-                download_result = await asyncio.wait_for(task, timeout=TG_DL_TIMEOUT)
-                if download_result:
-                    logger.info("FILE SENT:[%s]", file_name_path)
-                # shutil.move(file_name_path, file_name_path + "_process")
-        await msg.edit('{} files submitted'.format(sending))
-        logger.info("FILES SUBMITTED:[%s]", sending)
-
+    elif update.message.message == '/download':
+        message = await client.send_message(CID, '📂 Choose file or folder to download')
+        await send_folders_structure(message, CID, [f'{message.id}'], operation='send')
+        return
     # -------------- -------------- --------------
     # -------------- SUBSCRIPTIONS --------------
     # -------------- -------------- --------------
