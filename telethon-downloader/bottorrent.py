@@ -16,7 +16,8 @@ from env import *
 from logger import logger
 from model.subscription import Subscription
 from utils import send_folders_structure, \
-    execute_queries, tg_send_message, is_file_torrent, splash, replace_right, tg_send_file
+    execute_queries, tg_send_message_to_admin, is_file_torrent, splash, replace_right, tg_send_file, tg_send_message, \
+    tg_reply_message, insert_last_message
 
 download_path_torrent = TG_DOWNLOAD_PATH_TORRENTS  # Directory where to save torrent file (if enabled). Connect with
 # torrent client to start download.
@@ -31,25 +32,33 @@ for x in list(subs_query):
 
 
 @client.on(events.CallbackQuery())
-async def callback(event):
+async def callback(event, new_data=None):
     real_id = get_peer_id(event.sender)
     user_id, peer_type = resolve_id(real_id)
     user_id = str(user_id)
-    message_id = event.data.decode('utf-8')
+    message_id = event.data.decode('utf-8') if new_data is None else new_data
+    insert_last_message(user_id, event, None, None)
     if message_id.startswith('CANCEL,'):
-        execute_queries([(f'DELETE FROM locations where user_id=?', (user_id,))])
+        message_id = message_id.split(',')[1]
+        media_id, final_path, messages, operation = \
+            execute_queries([(f'SELECT message_id, location, messages_ids, operation '
+                              f'FROM locations '
+                              f'WHERE id=? and user_id=?',
+                              (message_id, user_id))])[0][0]
+        execute_queries([(f'DELETE FROM locations where user_id=? and message_id=?', (user_id, media_id))])
         return await event.edit('Canceled')
 
     elif message_id.startswith('STOP,'):
         await handle_folder_choose_operation(message_id, user_id, event, subs)
+
     elif message_id.startswith('FOLD,') or message_id.startswith('FILE,'):
         message_id_s = message_id.split(',')[1]
         media_id, final_path, messages, operation = \
             execute_queries([(f'SELECT message_id, location, messages_ids, operation '
                               f'FROM locations '
                               f'WHERE id=? and user_id=?',
-                              (message_id_s, user_id)),
-                             (f'DELETE FROM locations where user_id=?', (user_id,))])[0][0]
+                              (message_id_s, user_id))])[0][0]
+        execute_queries([(f'DELETE FROM locations where user_id=? and message_id=?', (user_id, media_id))])
 
         files = next(os.walk(final_path), (None, None, []))[2]
         files.sort(key=str.casefold)
@@ -64,23 +73,33 @@ async def callback(event):
 
         await event.edit('Sending file(s)...')
         await tg_send_file(int(user_id), files, total_size)
-        await client.send_message(int(user_id), '✅ {} files submitted'.format(size))
+        await tg_send_message(int(user_id), '✅ {} files submitted'.format(size))
 
-    elif message_id.startswith('NEW,'):
+    elif message_id.startswith('NEWFOLDER,'):
         message_id = message_id.split(',')[1]
+        media_id, final_path = \
+            execute_queries([(f'SELECT message_id, location '
+                              f'FROM locations '
+                              f'WHERE id=? and user_id=?',
+                              (message_id, user_id))])[0][0]
+        insert_last_message(user_id, event, 'new-folder', final_path)
         await event.edit('Insert new folder name',
-                         buttons=[[Button.inline('Back ', f'{message_id}'), Button.inline('❌ Cancel', data='CANCEL')]])
+                         buttons=[[Button.inline('⬅️ Back', data=f'BACKIN,{message_id}'),
+                                   Button.inline('❌ Cancel', data=f'CANCEL,{message_id}')]])
     else:
         is_back = False
         if message_id.startswith('BACK,'):
             message_id = message_id.split(',')[1]
             is_back = True
-        media_id, base_path, messages_ids, operation = \
-            execute_queries(
-                [(f'SELECT message_id, location, messages_ids, operation '
-                  f'FROM locations WHERE id=? and user_id=?',
-                  (message_id, user_id)),
-                 (f'DELETE FROM locations where user_id=?', (user_id,))])[0][0]
+        elif message_id.startswith('BACKIN,'):
+            message_id = message_id.split(',')[1]
+        media_id, base_path, messages_ids, operation, custom_message = \
+            execute_queries([(f'SELECT message_id, location, messages_ids, operation, custom_message '
+                              f'FROM locations '
+                              f'WHERE id=? and user_id=?',
+                              (message_id, user_id))])[0][0]
+        execute_queries([(f'DELETE FROM locations where user_id=? and message_id=?', (user_id, media_id))])
+
         if is_back:
             base_path = os.path.split(base_path)[0]
         if operation == 'subscription':
@@ -88,8 +107,9 @@ async def callback(event):
             messages_ids = [title, media_id]
         else:
             messages_ids = messages_ids.split(',')
-
-        await send_folders_structure(event, user_id, messages_ids, base_path, operation=operation)
+        insert_last_message(user_id, event, operation, base_path)
+        await send_folders_structure(event, user_id, messages_ids, base_path, operation=operation,
+                                     custom_message=custom_message)
 
 
 async def answer_with_structure(message, user_id):
@@ -123,38 +143,38 @@ async def raw_handler(event):
     real_user_id = get_peer_id(event.message.peer_id)
     user_id, _ = resolve_id(real_user_id)
     if user_id in subs and chat_id in subs[user_id]:
-        await client.send_message(user_id, '❌ Already subscribed')
+        await tg_send_message(user_id, '❌ Already subscribed')
     else:
         user_client = user_clients[user_id]
         if user_client.is_authenticated() is False:
-            await client.send_message(user_id,
-                                      '⚠️ You are not authenticated. Please use /login command to authenticate')
+            await tg_send_message(user_id,
+                                  '⚠️ You are not authenticated. Please use /login command to authenticate')
         else:
             chat_from = await user_client.get_client().get_entity(event.message.action.peer)
-            message = await client.send_message(event.message.peer_id, '📂 Choose download folder')
+            message = await tg_send_message(event.message.peer_id, '📂 Choose download folder')
             await send_folders_structure(message,
                                          user_id,
                                          [chat_from.title, f'{chat_id}'],
                                          operation='subscription')
 
 
-@events.register(events.NewMessage)
+@events.register(events.NewMessage(incoming=True))
 async def handler(update: events.NewMessage.Event, is_subscription=False, subscription: Subscription = None,
                   user_client=None):
+    real_id = get_peer_id(update.message.peer_id)
+    CID, peer_type = resolve_id(real_id)
     try:
-        real_id = get_peer_id(update.message.peer_id)
-        CID, peer_type = resolve_id(real_id)
-
         if (update.message.contact and (AUTHORIZED_USER and CID in user_ids) and CID in user_clients
                 and user_clients[CID].is_authenticated() is not True
                 and update.message.contact.user_id == CID):
             phone = telethon.utils.parse_phone(update.message.contact.phone_number)
             await user_clients[CID].get_client().send_code_request(phone, force_sms=False)
             user_clients[CID].set_phone(phone)
-            await client.send_message(CID, '📱 Insert code received via Telegram with the format <b>+[code]</b>\n'
-                                           'and put whitespaces between the digits\n\n'
-                                           'Example: <b>+ 2 3 4 6 2</b>',
-                                      buttons=Button.clear())
+            await tg_send_message(CID, '📱 Insert code received via Telegram with the format <b>+[code]</b>\n'
+                                       'and put whitespaces between the digits\n\n'
+                                       'Example: <b>+ 2 3 4 6 2</b>',
+                                  buttons=Button.clear(),
+                                  operation='login')
             return
 
         if update.message.from_id is not None:
@@ -171,11 +191,11 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
                 return
 
             if is_subscription is True:
-                message = await client.send_message(CID,
-                                                    f'New file found on subscription chat {subscription.display_name},'
-                                                    f' download file...')
+                message = await tg_send_message(CID,
+                                                f'New file found on subscription chat {subscription.display_name},'
+                                                f' download file...')
             else:
-                message = await update.reply('Download in queue...')
+                message = await tg_reply_message(CID, update, 'Download in queue...')
 
             if is_torrent:
                 await queue.put([message, update.message, download_path_torrent, is_subscription, None])
@@ -193,19 +213,21 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
 
         elif AUTHORIZED_USER and CID in user_ids:
             if is_subscription is False:
-                await handle_regular_commands(update, CID, subs, auth_user_event_handler=user_event_handler)
+                await handle_regular_commands(update, CID, subs, auth_user_event_handler=user_event_handler,
+                                              callback_handler=callback)
 
         else:
             logger.info('UNAUTHORIZED USER: %s ', CID)
             if is_subscription is False:
-                await update.reply('UNAUTHORIZED USER: %s \n add this ID to TG_AUTHORIZED_USER_ID' % CID)
+                await tg_reply_message(CID, update,
+                                       'UNAUTHORIZED USER: %s \n add this ID to TG_AUTHORIZED_USER_ID' % CID)
             else:
-                await client.send_message(CID, 'UNAUTHORIZED USER: %s \n add this ID to TG_AUTHORIZED_USER_ID' % CID)
+                await tg_send_message(CID, 'UNAUTHORIZED USER: %s \n add this ID to TG_AUTHORIZED_USER_ID' % CID)
     except Exception as e:
         if is_subscription is False:
-            await update.reply('ERROR: ' + str(e))
+            await tg_reply_message(CID, update, 'ERROR: ' + str(e))
         else:
-            await tg_send_message('ERROR: ' + str(e))
+            await tg_send_message_to_admin('ERROR: ' + str(e))
         logger.info('EXCEPTION USER: %s ', str(e))
 
 
@@ -218,7 +240,7 @@ async def auth():
         if authenticated:
             u_client.add_event_handler(user_event_handler)
         elif user_client.get_user_id() in subs:
-            await client.send_message(
+            await tg_send_message(
                 user_client.get_user_id(),
                 f'⚠️ You have some subscriptions saved but you are not authenticated, please use /login command'
                 f' to authenticate otherwise I will not be able to download new files from your subscriptions')
@@ -272,7 +294,7 @@ if __name__ == '__main__':
                 )]
         )))
 
-        loop.run_until_complete(tg_send_message("Telethon Downloader Started: {}".format(VERSION)))
+        loop.run_until_complete(tg_send_message_to_admin("Telethon Downloader Started: {}".format(VERSION)))
         splash()
         logger.info("%s" % VERSION)
         logger.info("********** START TELETHON DOWNLOADER **********")

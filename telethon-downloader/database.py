@@ -13,8 +13,9 @@ if db is None:
         'location varchar(500) NOT NULL, '
         'message_id varchar(50) NOT NULL, '
         'display_location varchar(500), '
-        'messages_ids varchar(50000),'
-        'operation varchar(50) DEFAULT \'download\')')
+        'messages_ids varchar(50000), '
+        'operation varchar(50) DEFAULT \'download\', '
+        'custom_message varchar(1000) DEFAULT NULL)')
     db.execute(
         'CREATE TABLE IF NOT EXISTS subscriptions ('
         'id INTEGER PRIMARY KEY, '

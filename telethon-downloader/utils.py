@@ -6,11 +6,12 @@ from typing import List, Tuple, Any, Union, Literal
 
 from telethon.tl.custom import Button
 
-from clients import client
+from clients import client, last_messages
 from database import db
 from env import PATH_COMPLETED, TG_AUTHORIZED_USER_ID, AUTHORIZED_USER, user_ids, TG_DL_TIMEOUT
 from logger import logger
 from model.timer import Timer
+from model.last_message import LastMessage
 
 
 def splash() -> None:
@@ -42,13 +43,6 @@ def split_input(input_) -> List[str]:
     else:
         inputs = list(map(str, input_.replace(" ", "").split(',')))
         return inputs
-
-
-def create_directory(download_path: str) -> None:
-    try:
-        os.makedirs(download_path, exist_ok=True)
-    except Exception as e:
-        logger.info(f'create_directory Exception : {download_path} [{e}]')
 
 
 def sizeof_fmt(num, suffix="b"):
@@ -86,7 +80,7 @@ async def upload_progress(action, current, total, event, start, timer, total_siz
 
 
 async def send_file(CID, file, start, timer, action, total_size=None, len_files=1, name=''):
-    event = await client.send_message(CID, 'Starting upload...')
+    event = await tg_send_message(CID, 'Starting upload...')
     await client.send_file(CID, file, caption=name, force_document=True,
                            progress_callback=lambda curr, tot: upload_progress(action, curr, tot,
                                                                                event, start,
@@ -104,12 +98,13 @@ async def tg_send_file(CID, file, total_size, name=''):
         await asyncio.sleep(1)
 
 
-def get_folders(message_id, user_id, message_media_ids, path, operation):
+def get_folders(message_id, user_id, message_media_ids, path, operation, custom_message):
     """ Returns a list of folders in the path """
     folders = []
     for f in os.listdir(path):
         if os.path.isdir(os.path.join(path, f)):
-            folders.append((message_id, user_id, os.path.join(path, f), f, message_media_ids, operation))
+            folders.append(
+                (message_id, user_id, os.path.join(path, f), f, message_media_ids, operation, custom_message))
     return folders
 
 
@@ -127,18 +122,21 @@ def execute_queries(queries: List[Tuple[str, Tuple[Any, ...]]]):
 
 
 async def send_folders_structure(message_to_edit, user_id, message_media_ids, base_path=PATH_COMPLETED,
-                                 operation: Union[
-                                     Literal['download'], Literal['subscription'], Literal['send']] = 'download'):
+                                 operation:
+                                 Literal['download'] | Literal['subscription'] | Literal['send'] | Literal['new-folder']
+                                 = 'download',
+                                 custom_message=None):
     message_media_id = message_media_ids[-1]
     messages_join = ','.join(message_media_ids)
-    dirs = get_folders(message_media_id, user_id, messages_join, base_path, operation)
+    dirs = get_folders(message_media_id, user_id, messages_join, base_path, operation, custom_message)
     try:
         with db:
             cur = db.cursor()
             # Insert sub folders
             cur.executemany(
-                'INSERT INTO locations(message_id, user_id, location,display_location, messages_ids, operation) '
-                'VALUES (?, ?, ?, ?, ?, ?)', dirs)
+                'INSERT INTO locations(message_id, user_id, location,display_location, messages_ids, operation, '
+                'custom_message) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)', dirs)
             dirs = cur.execute('SELECT id, display_location FROM locations where message_id=? and user_id=?',
                                (f'{message_media_id}', f'{user_id}'))
             dirs = sorted(dirs, key=lambda x: x[1])
@@ -148,9 +146,9 @@ async def send_folders_structure(message_to_edit, user_id, message_media_ids, ba
 
             # Insert current dir
             cur.execute('INSERT INTO locations'
-                        '(message_id, user_id, location, display_location, messages_ids, operation) '
-                        'VALUES (?, ?, ?, ?, ?, ?)',
-                        (message_media_id, user_id, base_path, base_path, messages_join, operation))
+                        '(message_id, user_id, location, display_location, messages_ids, operation, custom_message) '
+                        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        (message_media_id, user_id, base_path, base_path, messages_join, operation, custom_message))
             current_id = cur.lastrowid
             is_root = False
             if base_path == PATH_COMPLETED:
@@ -159,10 +157,20 @@ async def send_folders_structure(message_to_edit, user_id, message_media_ids, ba
             operation_buttons = [Button.inline('➡️ This dir',
                                                data=f'STOP,{current_id}'),
                                  Button.inline('❌ Cancel', data=f'CANCEL,{current_id}')]
+            if operation != 'send' and operation != 'new-folder':
+                operation_buttons.insert(1, Button.inline('📂 New folder', data=f'NEWFOLDER,{current_id}'))
             if not is_root:
                 operation_buttons.insert(1, Button.inline('⬅️ Back', data=f'BACK,{current_id}'))
-            await message_to_edit.edit(f'📂 Choose download folder \n (current dir: {base_path})',
-                                       buttons=buttons + [operation_buttons])
+            if len(operation_buttons) > 3:
+                operation_buttons = [operation_buttons[i:i + 2] for i in range(0, len(operation_buttons), 2)]
+            else:
+                operation_buttons = [operation_buttons]
+            if custom_message is not None:
+                message_text = custom_message + f'\n (current dir: {base_path})'
+            else:
+                message_text = f'📂 Choose download folder \n (current dir: {base_path})'
+            await message_to_edit.edit(message_text,
+                                       buttons=buttons + operation_buttons)
     except Exception as why:
         logger.error(why)
         return False
@@ -177,12 +185,41 @@ def replace_right(source, target, replacement, replacements=None):
     return replacement.join(source.rsplit(target, replacements))
 
 
-async def tg_send_message(msg):
+async def tg_send_message_to_admin(msg):
     if AUTHORIZED_USER:
         return await client.send_message(user_ids[0], msg)
     else:
         await client.send_message(user_ids[0], 'ERROR: NO AUTHORIZED USER')
         raise Exception('ERROR: NO AUTHORIZED USER')
+
+
+async def tg_send_message(user_id, msg, operation=None, buttons=None, arg=None):
+    mes = await client.send_message(user_id, msg, buttons=buttons)
+    user_id = int(user_id.user_id) if hasattr(user_id, 'user_id') else int(user_id)
+    if operation is None:
+        last_messages[user_id] = None
+    else:
+        last_messages[user_id] = LastMessage(user_id, mes, operation, arg)
+    return mes
+
+
+async def tg_reply_message(user_id, update, msg, operation=None, buttons=None, arg=None):
+    mes = await update.reply(msg, buttons=buttons)
+    user_id = int(user_id.user_id) if hasattr(user_id, 'user_id') else int(user_id)
+    if operation is None:
+        last_messages[user_id] = None
+    else:
+        last_messages[user_id] = LastMessage(user_id, mes, operation, arg)
+    return mes
+
+
+def insert_last_message(user_id, message, operation, arg):
+    user_id = int(user_id.user_id) if hasattr(user_id, 'user_id') else int(user_id)
+    last_messages[user_id] = LastMessage(user_id, message, operation, arg)
+
+
+def get_last_client_message(user_id):
+    return last_messages[int(user_id)]
 
 
 def contains_telegram_code(input_string):

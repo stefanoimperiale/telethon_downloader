@@ -12,7 +12,7 @@ from clients import client, queue
 from env import TG_DL_TIMEOUT, TG_PROGRESS_DOWNLOAD, TG_UNZIP_TORRENTS, YOUTUBE_LINKS_SOPORTED
 from logger import logger
 from model.timer import Timer
-from utils import split_input, progress_bar
+from utils import split_input, progress_bar, tg_reply_message
 from youtube import download_youtube_video
 
 youtube_list = split_input(YOUTUBE_LINKS_SOPORTED)
@@ -115,12 +115,12 @@ async def download_worker():
 
         except asyncio.TimeoutError:
             logger.info('[%s] Time exceeded %s' % (file_name, time.strftime('%d/%m/%Y %H:%M:%S', time.localtime())))
-            await update.reply('ERROR: Time exceeded downloading this file')
+            await tg_reply_message(CID, update, 'ERROR: Time exceeded downloading this file')
         except Exception as e:
             logger.critical(e)
             logger.info('[EXCEPTION]: %s' % (str(e)))
             logger.info('[%s] Exception %s' % (file_name, time.strftime('%d/%m/%Y %H:%M:%S', time.localtime())))
-            await update.reply('ERROR: %s downloading : %s' % (e.__class__.__name__, str(e)))
+            await tg_reply_message(CID, update, 'ERROR: %s downloading : %s' % (e.__class__.__name__, str(e)))
 
-        # Unidad de trabajo terminada.
+        # Queue task done
         queue.task_done()

@@ -38,6 +38,7 @@ USER_SESSION = os.path.join(TG_CONFIG_PATH, 'userbot')
 
 PATH_TMP = os.path.join(TG_DOWNLOAD_PATH)
 PATH_COMPLETED = os.path.join(TG_DOWNLOAD_PATH)
+
 PATH_YOUTUBE = os.path.join(TG_DOWNLOAD_PATH, 'youtube')
 
 VERSION = "VERSION 4.1.0"
