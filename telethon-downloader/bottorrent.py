@@ -82,7 +82,7 @@ async def callback(event, new_data=None):
                               f'FROM locations '
                               f'WHERE id=? and user_id=?',
                               (message_id, user_id))])[0][0]
-        insert_last_message(user_id, event, 'new-folder', final_path)
+        insert_last_message(user_id, event, 'new-folder', (final_path, 'back'))
         await event.edit('Insert new folder name',
                          buttons=[[Button.inline('⬅️ Back', data=f'BACKIN,{message_id}'),
                                    Button.inline('❌ Cancel', data=f'CANCEL,{message_id}')]])
@@ -107,7 +107,7 @@ async def callback(event, new_data=None):
             messages_ids = [title, media_id]
         else:
             messages_ids = messages_ids.split(',')
-        insert_last_message(user_id, event, operation, base_path)
+        insert_last_message(user_id, event, operation, (base_path, 'finish' if operation == 'new-folder' else 'back'))
         await send_folders_structure(event, user_id, messages_ids, base_path, operation=operation,
                                      custom_message=custom_message)
 

@@ -76,7 +76,8 @@ async def handle_folder_choose_operation(message_id, user_id, event, subs):
                 *list(map(lambda x: [Button.inline(f'📄 {x[1]}', f'FILE,{message_id},{x[0]}')], enumerate(files))),
             ])
     elif operation == 'new-folder':
-        insert_last_message(user_id, None, 'new-folder', final_path)
+        insert_last_message(user_id, event, 'new-folder',
+                            (final_path, 'finish' if operation == 'new-folder' else 'back'))
         await event.edit('Insert new folder name',
                          buttons=[[Button.inline('⬅️ Back', data=f'BACK,{message_id}'),
                                    Button.inline('❌ Cancel', data=f'CANCEL,{message_id}')]])
@@ -106,7 +107,7 @@ async def handle_regular_commands(update, CID, subs, auth_user_event_handler, ca
                                      custom_message='📂 Choose file or folder to download')
     elif update.message.message == '/newfolder':
         message = await tg_send_message(CID, '📂 Choose where to create the new folder', operation='new-folder',
-                                        arg=PATH_COMPLETED)
+                                        arg=(PATH_COMPLETED, 'finish'))
         await send_folders_structure(message, CID, [f'{message.id}'], operation='new-folder',
                                      custom_message='📂 Choose where to create the new folder')
 
@@ -136,22 +137,16 @@ async def handle_regular_commands(update, CID, subs, auth_user_event_handler, ca
         # -------------- NEW FOLDER --------------
         elif last_message is not None and last_message.operation == 'new-folder':
             try:
-                os.makedirs(os.path.join(last_message.arg, update.message.message), exist_ok=True)
-                if last_message.message is not None:
-                    await last_message.message.edit('✅ Folder created')
-                    await asyncio.sleep(1)
+                os.makedirs(os.path.join(last_message.arg[0], update.message.message), exist_ok=True)
+                await last_message.message.edit('✅ Folder created')
+                await update.delete()
+                await asyncio.sleep(1)
+                if last_message.arg[1] == 'back':
                     data = last_message.message.data.decode('utf-8').split(',')
                     await callback_handler(last_message.message, f'BACKIN,{data[1]}')
-                else:
-                    # TODO clear db
-                    await tg_reply_message(CID, update, '✅ Folder created', buttons=Button.clear())
             except Exception as e:
                 logger.error(e)
-                if last_message.message is not None:
-                    await last_message.message.edit('❌ Error creating folder, try again')
-                else:
-                    await tg_reply_message(CID, update, '❌ Error creating folder, try again', buttons=Button.clear())
-                # TODO clear db
+                await last_message.message.edit('❌ Error creating folder, try again')
 
         # -------------- AUTH COMMANDS --------------
         elif required_auth(update.message, last_message):
