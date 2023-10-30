@@ -47,6 +47,7 @@ async def handle_folder_choose_operation(message_id, user_id, event, subs):
     if operation != 'send' and operation != 'new-folder':
         execute_queries([(f'DELETE FROM locations where user_id=? and message_id=?', (user_id, media_id))])
     if operation == 'download':
+        await event.edit('Download in queue...')
         producers = list(map(lambda x: asyncio.create_task(put_in_queue(final_path, x)), messages.split(',')))
         await asyncio.gather(*producers)
     elif operation == 'subscription':

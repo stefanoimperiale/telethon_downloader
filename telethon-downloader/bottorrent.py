@@ -183,11 +183,9 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
 
         if update.message.media is not None and (AUTHORIZED_USER and CID in user_ids):
             # When new media is sent to the chat, this function will be called
-            is_video = telethon.utils.is_video(update.message.media)
-            is_photo = TG_ALLOWED_PHOTO and (
-                    telethon.utils.is_image(update.message.media) or telethon.utils.is_gif(update.message.media))
+            is_photo = telethon.utils.is_image(update.message.media) or telethon.utils.is_gif(update.message.media)
             is_torrent = is_file_torrent(update.message)
-            if is_video is False and is_torrent is False and is_photo is False:
+            if is_photo and (TG_ALLOWED_PHOTO is not 'true' or TG_ALLOWED_PHOTO is not True):
                 return
 
             if is_subscription is True:
