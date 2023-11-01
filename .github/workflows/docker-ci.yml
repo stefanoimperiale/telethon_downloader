@@ -17,7 +17,7 @@ jobs:
 
       - name: Set version
         run: |
-          echo "version=$(cat telethon-downloader/bottorrent.py| grep "VERSION =" | egrep -o "[0-9.]{1,}")" >> $GITHUB_ENV
+          echo "$(cat telethon-downloader/env.py| grep "VERSION =" | egrep -o "[0-9.]{1,}")" >> $GITHUB_ENV
 
       - name: Docker meta
         id: meta
@@ -54,7 +54,7 @@ jobs:
 #          tags: ${{ steps.meta.outputs.tags }}
       - name: Build & Push Image amd64
         run: |
-          docker buildx build --push --platform linux/amd64 --tag ${{steps.meta.outputs.tags}} amd64-latest amd64-${{ env.version }} .
+          docker buildx build --push --platform linux/amd64 --tag ${{steps.meta.outputs.tags}} amd64-latest amd64-${{env.version}} .
       - name: Build & Push Image arm64
         run: |
-          docker buildx build --push --platform linux/amd64 --tag ${{steps.meta.outputs.tags}} arm64v8-latest arm64v8-${{ env.version }} -f ./Dockerfile.aarch64 .
+          docker buildx build --push --platform linux/amd64 --tag ${{steps.meta.outputs.tags}} arm64v8-latest arm64v8-${{env.version}} -f ./Dockerfile.aarch64 .
