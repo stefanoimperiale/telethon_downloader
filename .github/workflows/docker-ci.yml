@@ -43,5 +43,5 @@ jobs:
 
       - name: Merge images
         run: |
-          docker buildx imagetools create -t ${{ env.image }}:latest ${{ env.image }}:amd64-latest ${{ env.image }}:arm64-latest
+          docker buildx imagetools create -t ${{ env.image }}:latest ${{ env.image }}:amd64-latest ${{ env.image }}:arm64v8-latest
           docker buildx imagetools create -t ${{ env.image }}:${{env.version}} ${{ env.image }}:amd64-${{env.version}} ${{ env.image }}:arm64v8-${{env.version}}
