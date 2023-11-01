@@ -5,6 +5,9 @@ on:
     branches:
       - master
 
+env:
+  image: ${{ secrets.DOCKERHUB_USERNAME }}/telethon_downloader
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,12 +19,6 @@ jobs:
         run: |
           echo "version=$(cat telethon-downloader/env.py| grep "VERSION =" | egrep -o "[0-9.]{1,}")" >> $GITHUB_ENV
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          # list of Docker images to use as base name for tags
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/telethon_downloader
 
       - name: Login to Docker Hub
         uses: docker/login-action@v2
@@ -39,7 +36,7 @@ jobs:
 
       - name: Build & Push Image amd64
         run: |
-          docker buildx build --push --platform linux/amd64 -t ${{ steps.meta.outputs.images }}:latest -t ${{ steps.meta.outputs.images }}:${{ env.version }} -t ${{ steps.meta.outputs.images }}:amd64-latest -t ${{ steps.meta.outputs.images }}:amd64-${{env.version}} .
+          docker buildx build --push --platform linux/amd64 -t ${{ env.image }}:latest -t ${{ env.image }}:${{ env.version }} -t ${{ env.image }}:amd64-latest -t ${{ env.image }}:amd64-${{env.version}} .
       - name: Build & Push Image arm64
         run: |
-          docker buildx build --push --platform linux/amd64 -t ${{ steps.meta.outputs.images }}:latest -t ${{ steps.meta.outputs.images }}:${{ env.version }} -t ${{ steps.meta.outputs.images }}:arm64v8-latest -t ${{ steps.meta.outputs.images }}:arm64v8-${{env.version}} -f ./Dockerfile.aarch64 .
+          docker buildx build --push --platform linux/amd64 -t ${{ env.image }}:latest -t ${{ env.image }}:${{ env.version }} -t ${{ env.image }}:arm64v8-latest -t ${{ env.image }}:arm64v8-${{env.version}} -f ./Dockerfile.aarch64 .
