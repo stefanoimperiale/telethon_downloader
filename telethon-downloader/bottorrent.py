@@ -185,7 +185,7 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
             # When new media is sent to the chat, this function will be called
             is_photo = telethon.utils.is_image(update.message.media) or telethon.utils.is_gif(update.message.media)
             is_torrent = is_file_torrent(update.message)
-            if is_photo and (TG_ALLOWED_PHOTO is not 'true' or TG_ALLOWED_PHOTO is not True):
+            if is_photo and (TG_ALLOWED_PHOTO != 'true' or TG_ALLOWED_PHOTO is not True):
                 return
 
             if is_subscription is True:

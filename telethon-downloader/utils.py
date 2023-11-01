@@ -2,7 +2,7 @@ import asyncio
 import os
 import re
 import time
-from typing import List, Tuple, Any, Union, Literal
+from typing import List, Tuple, Any, Literal
 
 from telethon.tl.custom import Button
 
@@ -10,8 +10,8 @@ from clients import client, last_messages
 from database import db
 from env import PATH_COMPLETED, TG_AUTHORIZED_USER_ID, AUTHORIZED_USER, user_ids, TG_DL_TIMEOUT
 from logger import logger
-from model.timer import Timer
 from model.last_message import LastMessage
+from model.timer import Timer
 
 
 def splash() -> None:
@@ -177,8 +177,8 @@ async def send_folders_structure(message_to_edit, user_id, message_media_ids, ba
 
 
 def is_file_torrent(message):
-    return message.media.document.mime_type == 'application/x-bittorrent' or (
-            message.file.name is not None and message.file.name.lower().strip().endswith('.torrent'))
+    return hasattr(message.media, 'document') and (message.media.document.mime_type == 'application/x-bittorrent' or (
+            message.file.name is not None and message.file.name.lower().strip().endswith('.torrent')))
 
 
 def replace_right(source, target, replacement, replacements=None):

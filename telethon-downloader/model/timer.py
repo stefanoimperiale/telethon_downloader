@@ -2,7 +2,7 @@ import time
 
 
 class Timer:
-    def __init__(self, time_between=2):
+    def __init__(self, time_between=3):
         self.start_time = time.time()
         self.time_between = time_between
 

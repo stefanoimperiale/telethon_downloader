@@ -22,14 +22,14 @@ TG_AUTHORIZED_USER_ID = get_env('TG_AUTHORIZED_USER_ID', False)
 TG_CONFIG_PATH = get_env('TG_CONFIG_PATH', '/config')
 TG_DOWNLOAD_PATH = get_env('TG_DOWNLOAD_PATH', '/download')
 TG_DOWNLOAD_PATH_TORRENTS = get_env('TG_DOWNLOAD_PATH_TORRENTS', '/watch')
-YOUTUBE_LINKS_SOPORTED = get_env('YOUTUBE_LINKS_SOPORTED', 'youtube.com,youtu.be')
+YOUTUBE_LINKS_SOPORTED = get_env('YOUTUBE_LINKS_SUPPORTED', 'youtube.com,youtu.be')
 YOUTUBE_FORMAT = get_env('YOUTUBE_FORMAT', 'bestvideo+bestaudio/best')  # best
 TG_UNZIP_TORRENTS = get_env('TG_UNZIP_TORRENTS', False)
 TG_PROGRESS_DOWNLOAD = get_env('TG_PROGRESS_DOWNLOAD', True)
 TG_ALLOWED_PHOTO = get_env('TG_ALLOWED_PHOTO', False)
 
 TG_MAX_PARALLEL = int(os.environ.get('TG_MAX_PARALLEL', 4))
-TG_DL_TIMEOUT = int(os.environ.get('TG_DL_TIMEOUT', 3600))
+TG_DL_TIMEOUT = int(os.environ.get('TG_DL_TIMEOUT', 7200))
 YT_DL_TIMEOUT = int(os.environ.get('TG_DL_TIMEOUT', 7200))
 
 TG_SQLITE_FILE = os.path.join(TG_CONFIG_PATH, 'bottorrent.db')
@@ -47,6 +47,7 @@ HELP = """
 /subscribe  : Subscribe to a channel or a group and download a new media file as soon as it is posted
 /version	: Version  
 /download	: Download files or folder inside your mapped download directory
+
 /id			: YOUR ID TELEGRAM
 """
 
