@@ -17,7 +17,7 @@ jobs:
 
       - name: Set version
         run: |
-          echo "$(cat telethon-downloader/env.py| grep "VERSION =" | egrep -o "[0-9.]{1,}")" >> $GITHUB_ENV
+          echo "version=$(cat telethon-downloader/env.py| grep "VERSION =" | egrep -o "[0-9.]{1,}")" >> $GITHUB_ENV
 
       - name: Docker meta
         id: meta
