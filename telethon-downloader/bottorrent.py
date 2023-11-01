@@ -127,7 +127,7 @@ async def user_event_handler(event):
 
     u_clients = user_clients.values()
     message_client = event.client
-    u_client = next((cli for cli in u_clients if cli.get_client() == message_client), None)
+    u_client = await anext((cli for cli in u_clients if (await cli.get_client() == message_client)), None)
     if u_client and u_client.get_user_id() in subs and chat_id in subs[u_client.get_user_id()]:
         subscription = subs[u_client.get_user_id()][chat_id]
         event.message.peer_id = u_client.get_user_id()
@@ -150,7 +150,7 @@ async def raw_handler(event):
             await tg_send_message(user_id,
                                   '⚠️ You are not authenticated. Please use /login command to authenticate')
         else:
-            chat_from = await user_client.get_client().get_entity(event.message.action.peer)
+            chat_from = await(await user_client.get_client()).get_entity(event.message.action.peer)
             message = await tg_send_message(event.message.peer_id, '📂 Choose download folder')
             await send_folders_structure(message,
                                          user_id,
@@ -168,7 +168,7 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
                 and user_clients[CID].is_authenticated() is not True
                 and update.message.contact.user_id == CID):
             phone = telethon.utils.parse_phone(update.message.contact.phone_number)
-            await user_clients[CID].get_client().send_code_request(phone, force_sms=False)
+            await (await user_clients[CID].get_client()).send_code_request(phone, force_sms=False)
             user_clients[CID].set_phone(phone)
             await tg_send_message(CID, '📱 Insert code received via Telegram with the format <b>+[code]</b>\n'
                                        'and put whitespaces between the digits\n\n'
@@ -199,7 +199,7 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
                 await queue.put([message, update.message, download_path_torrent, is_subscription, None])
             elif is_subscription is True:
                 await queue.put(
-                    [message, update.message, subscription.location, is_subscription, user_client.get_client()])
+                    [message, update.message, subscription.location, is_subscription, await user_client.get_client()])
             else:
                 current_messages.append((str(update.message.id) + ";" + str(message.id)))
                 global current_timer
@@ -231,7 +231,7 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
 
 async def auth():
     for user_client in user_clients.values():
-        u_client = user_client.get_client()
+        u_client = await user_client.get_client()
         await u_client.connect()
         authenticated = await u_client.is_user_authorized()
         user_client.set_authenticated(authenticated)
@@ -246,9 +246,9 @@ async def auth():
 
 if __name__ == '__main__':
     tasks = []
+    loop = asyncio.get_event_loop()
     try:
         # Create concurrently tasks.
-        loop = asyncio.get_event_loop()
         for i in range(number_of_parallel_downloads):
             task = loop.create_task(download_worker())
             tasks.append(task)
@@ -305,5 +305,5 @@ if __name__ == '__main__':
         # Stop Telethon
         client.disconnect()
         for u in user_clients.values():
-            u.get_client().disconnect()
+            loop.run_until_complete(u.get_client()).disconnect()
         logger.info("********** STOPPED **********")

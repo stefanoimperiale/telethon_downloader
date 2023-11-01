@@ -121,10 +121,10 @@ async def handle_regular_commands(update, CID, subs, auth_user_event_handler, ca
                 and u_client
                 and contains_telegram_code(update.message.message.replace(' ', ''))
                 and u_client.get_phone() is not None):
-            await u_client.get_client().sign_in(u_client.get_phone(),
-                                                code=update.message.message.replace(' ', '').replace('+', ''))
+            await (await u_client.get_client()).sign_in(u_client.get_phone(),
+                                                        code=update.message.message.replace(' ', '').replace('+', ''))
             u_client.set_authenticated(True)
-            u_client.get_client().add_event_handler(auth_user_event_handler)
+            (await u_client.get_client()).add_event_handler(auth_user_event_handler)
             await tg_send_message(CID, '✅ You are authenticated')
 
         # -------------- LOGIN --------------

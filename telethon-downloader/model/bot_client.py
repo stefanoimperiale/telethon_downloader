@@ -6,7 +6,10 @@ class BotClient:
         self._user_id = user_id
         self._phone = None
 
-    def get_client(self):
+    async def get_client(self):
+        is_conn = self._client.is_connected()
+        if not is_conn:
+            await self._client.connect()
         return self._client
 
     def get_user_id(self):
