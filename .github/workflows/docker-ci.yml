@@ -39,9 +39,11 @@ jobs:
           docker buildx build --push --platform linux/amd64 -t ${{ env.image }}:amd64-latest -t ${{ env.image }}:amd64-${{env.version}} .
       - name: Build & Push Image arm64
         run: |
-          docker buildx build --push --platform linux/amd64 -t ${{ env.image }}:latest -t ${{ env.image }}:${{ env.version }} -t ${{ env.image }}:arm64v8-latest -t ${{ env.image }}:arm64v8-${{env.version}} -f ./Dockerfile.aarch64 .
+          docker buildx build --push --platform linux/amd64  -t ${{ env.image }}:arm64v8-latest -t ${{ env.image }}:arm64v8-${{env.version}} -f ./Dockerfile.aarch64 .
 
       - name: Merge images
         run: |
           docker manifest create ${{ env.image }}:latest --amend ${{ env.image }}:amd64-latest --amend ${{ env.image }}:arm64-latest
           docker manifest push ${{ env.image }}:latest
+          docker manifest create ${{ env.image }}:${{env.version}} --amend ${{ env.image }}:amd64-${{env.version}} --amend ${{ env.image }}:arm64v8-${{env.version}}
+          docker manifest push ${{ env.image }}:${{env.version}}
