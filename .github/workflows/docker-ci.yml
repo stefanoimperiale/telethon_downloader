@@ -39,7 +39,7 @@ jobs:
 
       - name: Build & Push Image amd64
         run: |
-          docker buildx build --push --platform linux/amd64 -t latest -t ${{ env.version }} -t amd64-latest -t amd64-${{env.version}} .
+          docker buildx build --push --platform linux/amd64 -t ${{ steps.meta.outputs.images }}:latest -t ${{ steps.meta.outputs.images }}:${{ env.version }} -t ${{ steps.meta.outputs.images }}:amd64-latest -t ${{ steps.meta.outputs.images }}:amd64-${{env.version}} .
       - name: Build & Push Image arm64
         run: |
-          docker buildx build --push --platform linux/amd64 -t latest -t ${{ env.version }} -t arm64v8-latest -t arm64v8-${{env.version}} -f ./Dockerfile.aarch64 .
+          docker buildx build --push --platform linux/amd64 -t ${{ steps.meta.outputs.images }}:latest -t ${{ steps.meta.outputs.images }}:${{ env.version }} -t ${{ steps.meta.outputs.images }}:arm64v8-latest -t ${{ steps.meta.outputs.images }}:arm64v8-${{env.version}} -f ./Dockerfile.aarch64 .
