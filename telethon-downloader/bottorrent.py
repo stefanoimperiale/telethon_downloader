@@ -279,6 +279,10 @@ if __name__ == '__main__':
                     description='Download files or folder inside your mapped download directory'
                 ),
                 types.BotCommand(
+                    command='downloadall', # TODO: add this command
+                    description='Download all media files inside chat history'
+                ),
+                types.BotCommand(
                     command='id',
                     description='Get your Telegram ID'
                 ),

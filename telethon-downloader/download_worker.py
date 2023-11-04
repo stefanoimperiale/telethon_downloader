@@ -4,6 +4,7 @@ import re
 import time
 import zipfile
 
+import telethon.utils
 from telethon.tl.custom import Message
 from telethon.tl.types import DocumentAttributeFilename, MessageMediaPhoto
 from telethon.utils import get_peer_id, resolve_id, get_extension
@@ -49,6 +50,26 @@ async def callback_progress(current: int, total: int, message, download_path: st
         logger.info('ERROR: %s' % str(e))
 
 
+async def download_with_pause(message, file_path):
+    telethon.utils.get_input_media(message.media)
+    telethon.utils._get_file_info(message.media)
+
+    try:
+        offset = os.path.getsize(file_path)
+    except OSError:
+        offset = 0
+
+    with open(file_path, 'ab') as fd:
+        # ^ append
+        async for chunk in client.iter_download(message.media, offset=offset):
+            #                                                 ^~~~~~~~~~~~~ resume from offset
+            # offset += chunk.nbytes(offset / message.media.document.size) * 100
+            offset += len(chunk)
+            current = (offset / message.media.document.size) * 100
+            print(current)
+            fd.write(chunk)
+
+
 async def download_worker():
     while True:
         queue_item = await queue.get()
@@ -85,16 +106,18 @@ async def download_worker():
             download_client = user_client if is_subscription else client
             if TG_PROGRESS_DOWNLOAD is True or TG_PROGRESS_DOWNLOAD == 'True':
                 start = time.perf_counter()
-                task = loop.create_task(download_client.download_media(message, file_path,
-                                                                       progress_callback=lambda x, y: callback_progress(
-                                                                           x, y,
-                                                                           update,
-                                                                           file_path,
-                                                                           start,
-                                                                           timer)))
+                task = loop.create_task(download_with_pause(message, file_path))
+                # task = loop.create_task(download_client.download_media(message, file_path,
+                #                                                        progress_callback=lambda x, y: callback_progress(
+                #                                                            x, y,
+                #                                                            update,
+                #                                                            file_path,
+                #                                                            start,
+                #                                                            timer)))
             else:
                 task = loop.create_task(download_client.download_media(message, file_path))
-
+            await asyncio.sleep(5)
+            task.cancel()
             await asyncio.wait_for(task, timeout=TG_DL_TIMEOUT)
             end_time = time.strftime('%d/%m/%Y %H:%M:%S', time.localtime())
             end_time_short = time.strftime('%H:%M', time.localtime())
