@@ -9,7 +9,7 @@ from telethon.tl import types
 from telethon.tl.custom import Button
 from telethon.utils import get_peer_id, resolve_id
 
-from clients import client, queue, user_clients
+from clients import client, queue, user_clients, current_tasks
 from commands import handle_regular_commands, handle_folder_choose_operation
 from download_worker import download_worker
 from env import *
@@ -22,8 +22,10 @@ from utils import send_folders_structure, \
 download_path_torrent = TG_DOWNLOAD_PATH_TORRENTS  # Directory where to save torrent file (if enabled). Connect with
 # torrent client to start download.
 number_of_parallel_downloads = TG_MAX_PARALLEL
-current_messages = list()
+current_messages = defaultdict(list)
+current_messages_sub = defaultdict(list)
 current_timer = None
+current_timer_sub = None
 timeout = 1
 subs_query = execute_queries([('SELECT user_id, chat_id, location, display_name FROM subscriptions', ())])[0]
 subs = defaultdict(dict)
@@ -34,11 +36,25 @@ for x in list(subs_query):
 @client.on(events.CallbackQuery())
 async def callback(event, new_data=None):
     real_id = get_peer_id(event.sender)
-    user_id, peer_type = resolve_id(real_id)
-    user_id = str(user_id)
+    user_i, peer_type = resolve_id(real_id)
+    user_id = str(user_i)
     message_id = event.data.decode('utf-8') if new_data is None else new_data
     insert_last_message(user_id, event, None, None)
-    if message_id.startswith('CANCEL,'):
+    await event.answer()
+    if message_id.startswith('D_CANCEL,'):
+        task_id = message_id.split(',')[1]
+        if task_id in current_tasks[user_i]:
+            await current_tasks[user_i][task_id].cancel('CANCEL')
+            del current_tasks[user_i][task_id]
+    elif message_id.startswith('PAUSE,'):
+        task_id = message_id.split(',')[1]
+        if task_id in current_tasks[user_i]:
+            await current_tasks[user_i][task_id].cancel('PAUSE')
+    elif message_id.startswith('RESUME,'):
+        task_id = message_id.split(',')[1]
+        if task_id in current_tasks[user_i]:
+            await queue.put(current_tasks[user_i][task_id].message + [task_id])
+    elif message_id.startswith('CANCEL,'):
         message_id = message_id.split(',')[1]
         media_id, final_path, messages, operation = \
             execute_queries([(f'SELECT message_id, location, messages_ids, operation '
@@ -113,9 +129,18 @@ async def callback(event, new_data=None):
 
 
 async def answer_with_structure(message, user_id):
-    messages_id = current_messages.copy()
+    messages_id = current_messages[user_id].copy()
     current_messages.clear()
     await send_folders_structure(message, user_id, messages_id)
+
+
+async def answer_subs(user_id, message_edit):
+    messages = current_messages_sub[user_id].copy()
+    current_messages_sub[user_id].clear()
+    for message in messages:
+        await queue.put(message)
+    await asyncio.sleep(1)
+    await message_edit.reply('✅ All files submitted', buttons=Button.text('❌ Stop all downloads', resize=True))
 
 
 @events.register(events.NewMessage(func=lambda e: e.is_channel is True or e.is_group is True))
@@ -150,7 +175,7 @@ async def raw_handler(event):
             await tg_send_message(user_id,
                                   '⚠️ You are not authenticated. Please use /login command to authenticate')
         else:
-            chat_from = await(await user_client.get_client()).get_entity(event.message.action.peer)
+            chat_from = await (await user_client.get_client()).get_entity(event.message.action.peer)
             message = await tg_send_message(event.message.peer_id, '📂 Choose download folder')
             await send_folders_structure(message,
                                          user_id,
@@ -198,10 +223,15 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
             if is_torrent:
                 await queue.put([message, update.message, download_path_torrent, is_subscription, None])
             elif is_subscription is True:
-                await queue.put(
+                current_messages_sub[CID].append(
                     [message, update.message, subscription.location, is_subscription, await user_client.get_client()])
+                global current_timer_sub
+                if current_timer_sub is not None:
+                    current_timer_sub.cancel()
+                loop_ = asyncio.get_event_loop()
+                current_timer_sub = loop_.call_later(timeout, lambda: asyncio.ensure_future(answer_subs(CID, message)))
             else:
-                current_messages.append((str(update.message.id) + ";" + str(message.id)))
+                current_messages[CID].append((str(update.message.id) + ";" + str(message.id)))
                 global current_timer
                 if current_timer is not None:
                     current_timer.cancel()
@@ -279,7 +309,7 @@ if __name__ == '__main__':
                     description='Download files or folder inside your mapped download directory'
                 ),
                 types.BotCommand(
-                    command='downloadall', # TODO: add this command
+                    command='downloadall',  # TODO: add this command
                     description='Download all media files inside chat history'
                 ),
                 types.BotCommand(

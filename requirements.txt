@@ -3,3 +3,4 @@ yt_dlp
 cryptg
 hachoir
 pillow
+filelock

@@ -6,7 +6,7 @@ from telethon import Button, functions
 from telethon.tl.types import (KeyboardButtonRequestPeer, RequestPeerTypeBroadcast, RequestPeerTypeChat,
                                KeyboardButton, KeyboardButtonRow, ReplyKeyboardMarkup, InputMessageID)
 
-from clients import user_clients, client, queue
+from clients import user_clients, client, queue, current_tasks
 from env import REQUEST_CHAT_ID, HELP, VERSION, PATH_COMPLETED
 from logger import logger
 from model.subscription import Subscription
@@ -50,6 +50,7 @@ async def handle_folder_choose_operation(message_id, user_id, event, subs):
         await event.edit('Download in queue...')
         producers = list(map(lambda x: asyncio.create_task(put_in_queue(final_path, x)), messages.split(',')))
         await asyncio.gather(*producers)
+        await event.reply('✅ All files submitted', buttons=Button.text('❌ Stop all downloads', resize=True))
     elif operation == 'subscription':
         title = replace_right(messages, f',{media_id}', '', 1)
         chat_id = media_id
@@ -85,6 +86,14 @@ async def handle_folder_choose_operation(message_id, user_id, event, subs):
 
 
 async def handle_regular_commands(update, CID, subs, auth_user_event_handler, callback_handler):
+    # -------------- Stop All Downloads --------------
+    if update.message.message == '❌ Stop all downloads':
+        await tg_reply_message(CID, update, 'Stopping all downloads...', buttons=Button.clear())
+        for t in current_tasks[CID].values():
+            await t.cancel('CANCEL')
+        current_tasks[CID].clear()
+        await tg_reply_message(CID, update, 'All downloads stopped', buttons=Button.clear())
+        return
     # -------------- CANCEL --------------
     if update.message.message == '❌ Cancel':
         await tg_reply_message(CID, update, 'Canceled', buttons=Button.clear())
