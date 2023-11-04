@@ -20,7 +20,7 @@
     <img src="https://github.com/stefanoimperiale/telethon_downloader/blob/master/templates/UNRAID/telegram_logo.png?raw=true" alt="alt text" width="25%">
 </p>
 
-# [stefanoimperiale/telethon_downloader](https://github.com/jsavargas/stefanoimperiale)
+# [stefanoimperiale/telethon_downloader](https://github.com/stefanoimperiale/telethon_downloader)
 
 <i>This project is intent to be an evolution
 of [jsavargas/telethon_downloader](https://github.com/jsavargas/telethon_downloader)</i>
@@ -36,11 +36,16 @@ Additional features include:
   login with a Telegram account)
 - Multiple Telegram accounts supported in the same instance (if preauthorized)
 - Login integrated in the Telegram chat (no need to use the command line only if you don't have 2FA enabled, otherwise
-  see #2)
+  see [2FA Login](#2fa-login) section below)
 - Bulk destination folder selection
-- Bulk download of all files in a Telegram chat
 - Parallel downloads
 - Download file or a directory inside your mapped volume in the telegram chat
+
+## TODO:
+- Bulk download of all files in a Telegram chat
+- Stop all current downloads
+- Pause and resume downloads
+
 
 ![](https://raw.githubusercontent.com/stefanoimperiale/telethon_downloader/master/images/example.gif)
 
