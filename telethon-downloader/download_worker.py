@@ -59,7 +59,8 @@ async def callback_progress(current: int, total: int, task_id, message, download
         logger.info('ERROR: %s' % str(e))
 
 
-async def download_with_pause(download_client, message, file_path, offset, task_id, update, callback=None):
+async def download_with_pause(download_client, message, file_path, offset, task_id, update, print_message,
+                              callback=None):
     if isinstance(message, types.Message):
         message = message.media
     if isinstance(message, types.MessageMediaDocument):
@@ -78,41 +79,59 @@ async def download_with_pause(download_client, message, file_path, offset, task_
         logger.info('Unsupported message type')
         return
 
+    part_size_kb = telethon.utils.get_appropriated_part_size(total)
+    part_size = int(part_size_kb * 1024)
     lock_name = file_path + '.lock'
     try:
+        if print_message:
+            await client.edit_message(update,
+                                      f'⬇️ Downloading in: <i>"{file_path}"</i>',
+                                      buttons=[Button.inline('⏸️ Pause', data=f'PAUSE,{task_id}'),
+                                               Button.inline('✖️ Cancel', data=f'D_CANCEL,{task_id}')])
         lock = locks[lock_name]
         async with lock:
             with open(file_path, 'ab') as fd:
                 # ^ append
-                async for chunk in download_client.iter_download(doc, offset=offset):
+                async for chunk in download_client.iter_download(doc, offset=offset, request_size=part_size):
                     #                                                 ^~~~~~~~~~~~~ resume from offset
                     offset += len(chunk)
-                    if callback:
-                        await callback(offset, total)
                     fd.write(chunk)
+                    if callback:
+                        await callback(fd.tell(), total)
 
     except asyncio.CancelledError as e:
         if str(e) != 'PAUSE':
             if os.path.exists(file_path):
                 os.unlink(file_path)
-            await client.edit_message(update, '❌ Download cancelled')
         else:
             await client.edit_message(update, '⏸️ Download paused\n %s/%s' % (sizeof_fmt(offset), sizeof_fmt(total)),
                                       buttons=[Button.inline('▶️ Resume', data=f'RESUME,{task_id}'),
                                                Button.inline('✖️ Cancel', data=f'D_CANCEL,{task_id}')])
+            return 'PAUSE'
         return True
     except Exception as e:
         logger.info('ERROR: %s' % e.__class__.__name__)
         logger.info('ERROR: %s' % str(e))
+        if os.path.exists(file_path):
+            os.unlink(file_path)
         await client.edit_message(update, 'ERROR: %s downloading : %s' % (e.__class__.__name__, str(e)))
         return True
     finally:
         locks.pop(lock_name, None)
 
 
+async def wait_forever():
+    try:
+        await asyncio.Future()
+    except asyncio.CancelledError:
+        logger.info('Cancelled')
+
+
 async def download_worker():
     while True:
-        queue_item = await queue.get()
+        queue_item_t = await queue.get()
+        priority = queue_item_t[0]
+        queue_item = queue_item_t[1]
         update = queue_item[0]
         message = queue_item[1]
         final_folder = queue_item[2]
@@ -137,14 +156,16 @@ async def download_worker():
         task_id = task_id_old if task_id_old else uuid.uuid4().hex
 
         try:
-            await client.edit_message(update, f'Downloading in:\n<i>"{file_path}"</i>',
-                                      buttons=[Button.inline('⏸️ Pause', data=f'PAUSE,{task_id}'),
-                                               Button.inline('✖️ Cancel', data=f'D_CANCEL,{task_id}')])
-            await asyncio.sleep(1)
+            if task_id_old is None:
+                await client.edit_message(update, f'Downloading in:\n<i>"{file_path}"</i>',
+                                          buttons=[Button.inline('✖️ Cancel', data=f'D_CANCEL,{task_id}')])
+                await asyncio.sleep(1)
 
-            logger.info('Downloading... ')
-            logger.info('STARTING DOWNLOADING %s [%s] BY [%s]' % (
-                time.strftime('%d/%m/%Y %H:%M:%S', time.localtime()), file_path, CID))
+                logger.info('STARTING DOWNLOADING %s [%s] BY [%s]' % (
+                    time.strftime('%d/%m/%Y %H:%M:%S', time.localtime()), file_path, CID))
+            else:
+                await client.edit_message(update, f'Resuming download in:\n<i>"{file_path}"</i>',
+                                          buttons=[Button.inline('✖️ Cancel', data=f'D_CANCEL,{task_id}')])
             loop = asyncio.get_event_loop()
             download_client = user_client if is_subscription else client
 
@@ -161,23 +182,21 @@ async def download_worker():
                     file_path,
                     start,
                     timer))
-                # if offset > 0:
                 task = loop.create_task(
-                    download_with_pause(download_client, message, file_path, offset, task_id, update, callback))
-                # else:
-                #     task = loop.create_task(download_client.download_media(message, file_path,
-                #                                                            progress_callback=callback))
-
-            # elif offset > 0:
-            #     task = loop.create_task(download_client.download_media(message, file_path))
+                    download_with_pause(download_client, message, file_path, offset, task_id, update,
+                                        print_message=False if task_id_old else True,
+                                        callback=callback))
             else:
                 task = loop.create_task(
-                    download_with_pause(download_client, message, file_path, offset, task_id, update))
-            # await asyncio.sleep(5)
-            # task.cancel()
-            current_tasks[CID][task_id] = CurrentTask(task,
-                                                      [update, message, final_folder, is_subscription, user_client],
-                                                      file_path, 'DOWNLOAD')
+                    download_with_pause(download_client, message, file_path, offset, task_id, update,
+                                        print_message=False if task_id_old else True,
+                                        ))
+
+            curr_task = CurrentTask(task,
+                                    (priority,
+                                     [update, message, final_folder, is_subscription, user_client]),
+                                    file_path)
+            current_tasks[CID][task_id] = curr_task
             err = await asyncio.wait_for(task, timeout=TG_DL_TIMEOUT)
             end_time = time.strftime('%d/%m/%Y %H:%M:%S', time.localtime())
             end_time_short = time.strftime('%H:%M', time.localtime())
@@ -196,6 +215,10 @@ async def download_worker():
             if err is None:
                 await client.edit_message(update, '👍 Downloading finished:\n%s \nIN: %s\nat %s' % (
                     file_name, file_path, end_time_short))
+            elif err == 'PAUSE':
+                forever = loop.create_task(wait_forever())
+                curr_task.task = forever
+                await asyncio.wait_for(forever, timeout=TG_DL_TIMEOUT)
 
         except asyncio.TimeoutError:
             logger.info('[%s] Time exceeded %s' % (file_name, time.strftime('%d/%m/%Y %H:%M:%S', time.localtime())))

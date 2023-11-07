@@ -1,7 +1,43 @@
 import os
 from typing import Type, Tuple, List
 
+from telethon.tl import types
+
 from logger import logger
+
+COMMANDS = [
+    types.BotCommand(
+        command='help',
+        description='Get the list of available commands'
+    ),
+    types.BotCommand(
+        command='subscribe',
+        description='Listen for new messages in a channel or group'
+    ),
+    types.BotCommand(
+        command='version',
+        description='Get the version of the bot'
+    ),
+    types.BotCommand(
+        command='download',
+        description='Download files or folder inside your mapped download directory'
+    ),
+    types.BotCommand(
+        command='downloadall',
+        description='Download all media files inside chat history'
+    ),
+    types.BotCommand(
+        command='id',
+        description='Get your Telegram ID'
+    ),
+    types.BotCommand(
+        command='newfolder',
+        description='Create a new folder'
+    ),
+    types.BotCommand(
+        command='login',
+        description='Authenticate your Telegram account in order to use the subscribe command'
+    )]
 
 
 def get_env(name, message, cast: Type[str | bool | int] = str):
@@ -41,17 +77,10 @@ PATH_COMPLETED = os.path.join(TG_DOWNLOAD_PATH)
 
 PATH_YOUTUBE = os.path.join(TG_DOWNLOAD_PATH, 'youtube')
 
-VERSION = "VERSION 4.1.0"
-HELP = """
-/help		: This Screen
-/subscribe  : Subscribe to a channel or a group and download a new media file as soon as it is posted
-/version	: Version  
-/download	: Download files or folder inside your mapped download directory
-
-/id			: YOUR ID TELEGRAM
-"""
+VERSION = "VERSION 4.2.0"
 
 REQUEST_CHAT_ID = 22
+REQUEST_HISTORY_ID = 44
 
 
 def get_users() -> Tuple[bool, List[int]]:

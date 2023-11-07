@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
+import time
 from collections import defaultdict
 
 import telethon.utils
@@ -41,7 +42,10 @@ async def callback(event, new_data=None):
     message_id = event.data.decode('utf-8') if new_data is None else new_data
     insert_last_message(user_id, event, None, None)
     await event.answer()
-    if message_id.startswith('D_CANCEL,'):
+    if message_id.startswith('HISTORY,'):
+        chat_id = message_id.split(',')[1]
+        await send_folders_structure(event, user_id, [f'{chat_id}'], operation='history')
+    elif message_id.startswith('D_CANCEL,'):
         task_id = message_id.split(',')[1]
         if task_id in current_tasks[user_i]:
             await current_tasks[user_i][task_id].cancel('CANCEL')
@@ -53,7 +57,9 @@ async def callback(event, new_data=None):
     elif message_id.startswith('RESUME,'):
         task_id = message_id.split(',')[1]
         if task_id in current_tasks[user_i]:
-            await queue.put(current_tasks[user_i][task_id].message + [task_id])
+            mess = current_tasks[user_i][task_id].message
+            await queue.put((mess[0], mess[1] + [task_id]))
+            await current_tasks[user_i][task_id].cancel('RESUME')
     elif message_id.startswith('CANCEL,'):
         message_id = message_id.split(',')[1]
         media_id, final_path, messages, operation = \
@@ -137,8 +143,8 @@ async def answer_with_structure(message, user_id):
 async def answer_subs(user_id, message_edit):
     messages = current_messages_sub[user_id].copy()
     current_messages_sub[user_id].clear()
-    for message in messages:
-        await queue.put(message)
+    for ind, message in enumerate(messages):
+        await queue.put((time.time_ns() + ind, message))
     await asyncio.sleep(1)
     await message_edit.reply('✅ All files submitted', buttons=Button.text('❌ Stop all downloads', resize=True))
 
@@ -183,6 +189,24 @@ async def raw_handler(event):
                                          operation='subscription')
 
 
+@client.on(events.Raw(types=types.UpdateNewMessage, func=lambda e: e.message.action and (
+        e.message.action.button_id == REQUEST_HISTORY_ID or e.message.action.button_id == REQUEST_HISTORY_ID + 1)))
+async def raw_handler_history(event):
+    real_id = get_peer_id(event.message.action.peer)
+    chat_id, peer_type = resolve_id(real_id)
+    real_user_id = get_peer_id(event.message.peer_id)
+    user_id, _ = resolve_id(real_user_id)
+    user_client = user_clients[user_id]
+    if user_client.is_authenticated() is False:
+        await tg_send_message(user_id,
+                              '⚠️ You are not authenticated. Please use /login command to authenticate')
+    else:
+        await tg_send_message(user_id,
+                              "Write an offset and a limit in form <b>offset,limit</b> "
+                              "to start downloading from that message",
+                              'history', [Button.inline('All History', f'HISTORY,{chat_id}')], [chat_id])
+
+
 @events.register(events.NewMessage(incoming=True))
 async def handler(update: events.NewMessage.Event, is_subscription=False, subscription: Subscription = None,
                   user_client=None):
@@ -221,7 +245,8 @@ async def handler(update: events.NewMessage.Event, is_subscription=False, subscr
                 message = await tg_reply_message(CID, update, 'Download in queue...')
 
             if is_torrent:
-                await queue.put([message, update.message, download_path_torrent, is_subscription, None])
+                await queue.put(
+                    (time.time_ns(), [message, update.message, download_path_torrent, is_subscription, None]))
             elif is_subscription is True:
                 current_messages_sub[CID].append(
                     [message, update.message, subscription.location, is_subscription, await user_client.get_client()])
@@ -292,38 +317,7 @@ if __name__ == '__main__':
         loop.run_until_complete(client(functions.bots.SetBotCommandsRequest(
             scope=types.BotCommandScopeDefault(),
             lang_code='en',
-            commands=[types.BotCommand(
-                command='help',
-                description='Get the list of available commands'
-            ),
-                types.BotCommand(
-                    command='subscribe',
-                    description='Listen for new messages in a channel or group'
-                ),
-                types.BotCommand(
-                    command='version',
-                    description='Get the version of the bot'
-                ),
-                types.BotCommand(
-                    command='download',
-                    description='Download files or folder inside your mapped download directory'
-                ),
-                types.BotCommand(
-                    command='downloadall',  # TODO: add this command
-                    description='Download all media files inside chat history'
-                ),
-                types.BotCommand(
-                    command='id',
-                    description='Get your Telegram ID'
-                ),
-                types.BotCommand(
-                    command='newfolder',
-                    description='Create a new folder'
-                ),
-                types.BotCommand(
-                    command='login',
-                    description='Authenticate your Telegram account in order to use the subscribe command'
-                )]
+            commands=COMMANDS
         )))
 
         loop.run_until_complete(tg_send_message_to_admin("Telethon Downloader Started: {}".format(VERSION)))

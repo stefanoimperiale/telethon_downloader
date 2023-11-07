@@ -1,17 +1,53 @@
 import asyncio
 import os
 import re
+import time
 
+import telethon.tl.types
 from telethon import Button, functions
 from telethon.tl.types import (KeyboardButtonRequestPeer, RequestPeerTypeBroadcast, RequestPeerTypeChat,
                                KeyboardButton, KeyboardButtonRow, ReplyKeyboardMarkup, InputMessageID)
 
-from clients import user_clients, client, queue, current_tasks
-from env import REQUEST_CHAT_ID, HELP, VERSION, PATH_COMPLETED
+from clients import user_clients, client, queue, current_tasks, download_path_torrent
+from env import REQUEST_CHAT_ID, COMMANDS, VERSION, PATH_COMPLETED, REQUEST_HISTORY_ID, TG_ALLOWED_PHOTO
 from logger import logger
 from model.subscription import Subscription
 from utils import execute_queries, contains_telegram_code, send_folders_structure, replace_right, tg_send_message, \
-    tg_reply_message, get_last_client_message, insert_last_message
+    tg_reply_message, get_last_client_message, insert_last_message, is_file_torrent, contains_history_offset
+
+
+async def handle_history(event, user_id, chat_id, final_path, start, end):
+    u_client = user_clients[int(user_id)]
+    await event.edit('Retrieving messages...')
+    if u_client and u_client.is_authenticated() is True:
+        user_client = await u_client.get_client()
+        mess_size = 0
+        n = 0
+        async for message in user_client.iter_messages(int(chat_id), reverse=True):
+            n += 1
+            if (start is None or n > int(start)) and (end is None or n <= int(end) + 1):
+                if message.media is not None:
+                    mess_size += 1
+                    is_photo = telethon.utils.is_image(message.media) or telethon.utils.is_gif(message.media)
+                    is_torrent = is_file_torrent(message)
+                    if is_photo and (TG_ALLOWED_PHOTO != 'true' or TG_ALLOWED_PHOTO is not True):
+                        return
+                    message.peer_id = int(user_id)
+                    mess = await tg_send_message(int(user_id), f'|{message.message}\n Download in queue...')
+
+                    if is_torrent:
+                        await queue.put((time.time_ns(), [mess, message, download_path_torrent, True, user_client]))
+                    else:
+                        await queue.put((time.time_ns(), [mess, message, final_path, True, user_client]))
+                    if mess_size % 200 == 0:
+                        await event.reply('Waiting for 1 minute to avoid flood limit')
+                        await asyncio.sleep(60)
+        if mess_size > 0:
+            await event.reply('✅ All files submitted', buttons=Button.text('❌ Stop all downloads', resize=True))
+        else:
+            await event.reply('❌ No files found in the chat history')
+    else:
+        await event.reply('⚠️ You are not authenticated. Please use /login command to authenticate')
 
 
 async def auth_user(user_id):
@@ -22,19 +58,25 @@ async def auth_user(user_id):
 
 def required_auth(message, last_message):
     return (message.message == '/subscribe'
+            or message.message == '/downloadall'
             or message.message == '🗑 Remove subscription'
             or message.message == '☰ List subscriptions'
-            or last_message is not None and last_message.operation == 'remove-subscription'
-            )
+            or last_message is not None and (
+                    last_message.operation == 'remove-subscription' or last_message.operation == 'history'))
 
 
-async def put_in_queue(final_path: str, messages_id: str):
-    message_id, event_id = messages_id.split(';')
-    result = await client(
-        functions.messages.GetMessagesRequest(id=[InputMessageID(int(message_id)), InputMessageID(int(event_id))]))
-    message = result.messages[0]
-    event = result.messages[1]
-    await queue.put([event, message, final_path, False, None])
+async def put_in_queue(final_path: str, messages):
+    f_messages = list()
+    for messages_id in messages.split(','):
+        message_id, event_id = messages_id.split(';')
+        result = await client(
+            functions.messages.GetMessagesRequest(id=[InputMessageID(int(message_id)), InputMessageID(int(event_id))]))
+        message = result.messages[0]
+        event = result.messages[1]
+        f_messages.append((message, event))
+    for ind, (message, event) in enumerate(f_messages):
+        await queue.put((time.time_ns() + ind, [event, message, final_path, False, None]))
+    # await queue.put((queue.qsize(), [event, message, final_path, False, None]))
 
 
 async def handle_folder_choose_operation(message_id, user_id, event, subs):
@@ -48,8 +90,10 @@ async def handle_folder_choose_operation(message_id, user_id, event, subs):
         execute_queries([(f'DELETE FROM locations where user_id=? and message_id=?', (user_id, media_id))])
     if operation == 'download':
         await event.edit('Download in queue...')
-        producers = list(map(lambda x: asyncio.create_task(put_in_queue(final_path, x)), messages.split(',')))
-        await asyncio.gather(*producers)
+        await put_in_queue(final_path, messages)
+        # producers = list(map(lambda i, x: asyncio.create_task(put_in_queue(final_path, x, i)),
+        #                      enumerate(reversed(messages.split(',')))))
+        # await asyncio.gather(*producers)
         await event.reply('✅ All files submitted', buttons=Button.text('❌ Stop all downloads', resize=True))
     elif operation == 'subscription':
         title = replace_right(messages, f',{media_id}', '', 1)
@@ -83,23 +127,47 @@ async def handle_folder_choose_operation(message_id, user_id, event, subs):
         await event.edit('Insert new folder name',
                          buttons=[[Button.inline('⬅️ Back', data=f'BACK,{message_id}'),
                                    Button.inline('❌ Cancel', data=f'CANCEL,{message_id}')]])
+    elif operation == 'history':
+        offset = messages.split('-')
+        mes_id = offset[0]
+        start = offset[1] if len(offset) > 1 else None
+        end = offset[2] if len(offset) > 2 else None
+        await handle_history(event, user_id, mes_id, final_path, start, end)
+    return
 
 
 async def handle_regular_commands(update, CID, subs, auth_user_event_handler, callback_handler):
     # -------------- Stop All Downloads --------------
     if update.message.message == '❌ Stop all downloads':
         await tg_reply_message(CID, update, 'Stopping all downloads...', buttons=Button.clear())
+        updates = []
+        loop = asyncio.get_event_loop()
+        while not queue.empty():
+            queue_item = queue.get_nowait()
+            updates.append(loop.create_task(client.edit_message(queue_item[1][0], '❌ Download cancelled')))
+            queue.task_done()
         for t in current_tasks[CID].values():
             await t.cancel('CANCEL')
         current_tasks[CID].clear()
+        await asyncio.gather(*updates)
         await tg_reply_message(CID, update, 'All downloads stopped', buttons=Button.clear())
         return
     # -------------- CANCEL --------------
     if update.message.message == '❌ Cancel':
         await tg_reply_message(CID, update, 'Canceled', buttons=Button.clear())
+    # ---------------- START -----------------
+    elif update.message.message == '/start':
+        await tg_reply_message(CID, update, 'Hi, I\'m Telethon Downloader Bot\n'
+                                            'Use /help to see the available commands')
     # -------------- HELP --------------
     elif update.message.message == '/help':
-        await tg_reply_message(CID, update, HELP)
+        await tg_reply_message(CID, update,
+                               f"⚙️ Commands:\n\n"
+                               f"{'\n'.join(f'• /{val.command} - {val.description}' for val in COMMANDS)}"
+                               "\n\n\n❓ Have trouble? \n"
+                               "• Visit the project page on github\n"
+                               "https://github.com/stefanoimperiale/telethon_downloader"
+                               )
     # -------------- VERSION --------------
     elif update.message.message == '/version':
         await tg_reply_message(CID, update, VERSION)
@@ -164,6 +232,16 @@ async def handle_regular_commands(update, CID, subs, auth_user_event_handler, ca
                 await tg_reply_message(CID, update,
                                        '⚠️ You are not authenticated. Please use /login command to authenticate')
 
+            elif update.message.message == '/downloadall':
+                channels_k = KeyboardButtonRequestPeer('📣 Download from Channel', REQUEST_HISTORY_ID,
+                                                       RequestPeerTypeBroadcast())
+                groups_k = KeyboardButtonRequestPeer('👯‍♂️ Download from Group', REQUEST_HISTORY_ID + 1,
+                                                     RequestPeerTypeChat())
+                b = ReplyKeyboardMarkup(
+                    [KeyboardButtonRow([channels_k, groups_k])],
+                    resize=True, single_use=True)
+                await tg_reply_message(CID, update, 'Select from where get the message history', buttons=b)
+
             # -------------- -------------- --------------
             # -------------- SUBSCRIPTIONS --------------
             # -------------- -------------- --------------
@@ -226,5 +304,13 @@ async def handle_regular_commands(update, CID, subs, auth_user_event_handler, ca
                         await tg_reply_message(CID, update, '✅ Subscription removed', buttons=Button.clear())
                     else:
                         await tg_reply_message(CID, update, '❌ Error removing subscription', buttons=Button.clear())
+            elif last_message is not None and last_message.operation == 'history':
+                offset = contains_history_offset(update.message.message)
+                if offset is not False:
+                    start = offset[0]
+                    end = offset[1] if len(offset) > 1 else -1
+                    await send_folders_structure(last_message.message, CID, [f'{last_message.arg[0]}-{start}-{end}'],
+                                                 operation='history')
+
         else:
             await tg_reply_message(CID, update, '⚠️ Command not found, use /help to see the available commands')

@@ -22,4 +22,4 @@ if AUTHORIZED_USER:
     last_messages = dict((int(x), None) for x in user_ids)
     current_tasks = dict((int(x), dict()) for x in user_ids)
 
-queue = asyncio.Queue()
+queue = asyncio.PriorityQueue()

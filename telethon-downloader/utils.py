@@ -123,8 +123,8 @@ def execute_queries(queries: List[Tuple[str, Tuple[Any, ...]]]):
 
 async def send_folders_structure(message_to_edit, user_id, message_media_ids, base_path=PATH_COMPLETED,
                                  operation:
-                                 Literal['download'] | Literal['subscription'] | Literal['send'] | Literal['new-folder']
-                                 = 'download',
+                                 Literal['download'] | Literal['subscription'] | Literal['send'] | Literal[
+                                     'new-folder'] | Literal['history'] = 'download',
                                  custom_message=None):
     message_media_id = message_media_ids[-1]
     messages_join = ','.join(message_media_ids)
@@ -225,3 +225,21 @@ def get_last_client_message(user_id):
 def contains_telegram_code(input_string):
     pattern = r'\+\d{4,7}$'
     return bool(re.search(pattern, input_string))
+
+
+def contains_history_offset(input_string):
+    pattern = r'^\d+(,\d+)?$'
+
+    if re.match(pattern, input_string):
+        if "," in input_string:
+            first, second = map(int, input_string.split(','))
+            if 0 <= first <= second and second >= 0:
+                return [first, second]
+            else:
+                logger.warning("Invalid: Second number is not >= 0 or not greater than or equal to the first")
+                return False
+        elif int(input_string) >= 0:
+            return [int(input_string)]
+    else:
+        logger.warning("Invalid: Must be a positive integer or a range of positive integers")
+        return False
