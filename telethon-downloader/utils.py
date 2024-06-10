@@ -12,7 +12,7 @@ from env import PATH_COMPLETED, TG_AUTHORIZED_USER_ID, AUTHORIZED_USER, user_ids
 from logger import logger
 from model.last_message import LastMessage
 from model.timer import Timer
-
+from safe_telegram_client import safe_send_message
 
 def splash() -> None:
     """ Displays splash screen """
@@ -187,14 +187,14 @@ def replace_right(source, target, replacement, replacements=None):
 
 async def tg_send_message_to_admin(msg):
     if AUTHORIZED_USER:
-        return await client.send_message(user_ids[0], msg)
+        return await safe_send_message(user_ids[0], msg)
     else:
-        await client.send_message(user_ids[0], 'ERROR: NO AUTHORIZED USER')
+        await safe_send_message(user_ids[0], 'ERROR: NO AUTHORIZED USER')
         raise Exception('ERROR: NO AUTHORIZED USER')
 
 
 async def tg_send_message(user_id, msg, operation=None, buttons=None, arg=None):
-    mes = await client.send_message(user_id, msg, buttons=buttons)
+    mes = await safe_send_message(user_id, msg, buttons=buttons)
     user_id = int(user_id.user_id) if hasattr(user_id, 'user_id') else int(user_id)
     if operation is None:
         last_messages[user_id] = None
