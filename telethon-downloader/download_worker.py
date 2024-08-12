@@ -14,6 +14,7 @@ from logger import logger
 from model.timer import Timer
 from utils import split_input, progress_bar, tg_reply_message
 from youtube import download_youtube_video
+from safe_telegram_client import safe_edit_message
 
 youtube_list = split_input(YOUTUBE_LINKS_SOPORTED)
 
@@ -34,6 +35,7 @@ def get_file_name(message: Message) -> str:
     return file_name
 
 
+
 # Printing download progress
 async def callback_progress(current: int, total: int, message, download_path: str, start: float, timer: Timer):
     speed = "%.2f Mbps" % (current // (time.perf_counter() -
@@ -41,7 +43,7 @@ async def callback_progress(current: int, total: int, message, download_path: st
     progress = progress_bar(current, total, suffix=speed)
     try:
         if timer.can_send() or current == total:
-            await client.edit_message(message,
+            await safe_edit_message(message,
                                       f'⬇️ Downloading in: <i>"{download_path}"</i>'
                                       f'\n\n{progress}')
     except Exception as e:
@@ -73,7 +75,7 @@ async def download_worker():
 
         logger.info(f"getDownloadPath FILE [{file_name}] to [{file_path}]")
 
-        await client.edit_message(update, f'Downloading in:\n<i>"{file_path}"</i>')
+        await safe_edit_message(update, f'Downloading in:\n<i>"{file_path}"</i>')
         await asyncio.sleep(1)
 
         logger.info('Downloading... ')
@@ -110,7 +112,7 @@ async def download_worker():
             ######
             logger.info('DOWNLOAD FINISHED %s [%s] => [%s]' % (end_time, file_name, file_path))
             await asyncio.sleep(1)
-            await client.edit_message(update, '👍 Downloading finished:\n%s \nIN: %s\nat %s' % (
+            await safe_edit_message(update, '👍 Downloading finished:\n%s \nIN: %s\nat %s' % (
                 file_name, file_path, end_time_short))
 
         except asyncio.TimeoutError:
