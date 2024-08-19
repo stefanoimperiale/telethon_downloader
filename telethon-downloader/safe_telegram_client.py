@@ -13,8 +13,8 @@ async def safe_edit_message(messageId, text):
 
 async def safe_send_message(userId, text, buttons=None):
     try:
-        await client.send_message(userId, text, buttons)
+        await client.send_message(userId, text, buttons=buttons)
     except FloodWaitError as e:
         logger.warn(f"Flood wait error: Need to wait for {e.seconds} seconds")
         time.sleep(e.seconds)
-        await safe_send_message(userId, text, buttons)
+        await safe_send_message(userId, text, buttons=buttons)

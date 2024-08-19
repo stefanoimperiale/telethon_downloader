@@ -194,6 +194,9 @@ Before working with Telegram's API, you need to get your own API ID and hash:
 ```
 
 ## **Changelog:**
+**v4.1.1 (2024.08.19):**
+
+- fix issue with telethon api that prevented message to be sent
 
 **v4.0.0 (2023.10.27):**
 - add subriptions to channels and groups
